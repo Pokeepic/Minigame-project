@@ -11,7 +11,7 @@ GRID_HEIGHT = 20  # number of cells vertically
 
 WIDTH = CELL_SIZE * GRID_WIDTH
 HEIGHT = CELL_SIZE * GRID_HEIGHT
-FPS = 10  # game speed (higher = faster)
+FPS = 12  # game speed (higher = faster)
 
 # Colors (R, G, B)
 BLACK = (0, 0, 0)
