@@ -185,6 +185,9 @@ class StorageKeys {
 
   static const milestoneClaimedUpTo = 'milestoneClaimedUpTo';
 
+  static const lastAlertDateKey = 'lastAlertDateKey';
+}
+
 class SystemHomePage extends StatefulWidget {
   const SystemHomePage({super.key});
 
@@ -207,6 +210,8 @@ class _SystemHomePageState extends State<SystemHomePage> {
   String? lastClearedDateKey;
 
   int milestoneClaimedUpTo = 0;
+
+  String? lastAlertDateKey;
 
   String? systemMsg;
   bool systemMsgVisible = false;
@@ -240,6 +245,8 @@ class _SystemHomePageState extends State<SystemHomePage> {
 
     milestoneClaimedUpTo = prefs.getInt(StorageKeys.milestoneClaimedUpTo) ?? 0;
 
+    lastAlertDateKey = prefs.getString(StorageKeys.lastAlertDateKey);
+
     // Load daily bundle
     final jsonStr = prefs.getString(StorageKeys.dailyBundleJson);
     if (jsonStr != null) {
@@ -259,6 +266,7 @@ class _SystemHomePageState extends State<SystemHomePage> {
     }
 
     setState(() => loading = false);
+    await _maybeShowStreakAlert();
   }
 
   DailyQuestBundle _generateDailyBundleFor(String dateKey) {
@@ -301,6 +309,9 @@ class _SystemHomePageState extends State<SystemHomePage> {
       await prefs.setString(StorageKeys.lastClearedDateKey, lastClearedDateKey!);
     }
     await prefs.setInt(StorageKeys.milestoneClaimedUpTo, milestoneClaimedUpTo);
+    if (lastAlertDateKey != null) {
+      await prefs.setString(StorageKeys.lastAlertDateKey, lastAlertDateKey!);
+    }
     await _saveDailyBundle(prefs);
   }
 
@@ -437,6 +448,24 @@ class _SystemHomePageState extends State<SystemHomePage> {
     return 'MILESTONE REACHED! +$rewardXp XP +$rewardCoins Coins';
   }
 
+  Future<void> _maybeShowStreakAlert() async {
+    final today = todayKey();
+    if (lastAlertDateKey == today) return; // already shown today
+
+    // Only alert if user has an active streak and hasn't cleared today.
+    if (streak <= 0) return;
+    if (_clearedToday) return;
+
+    // If last clear was yesterday, today is the day to maintain streak.
+    if (lastClearedDateKey != yesterdayKey()) return;
+
+    // Mark as shown today
+    lastAlertDateKey = today;
+    await _saveAll();
+
+    showSystemMessage('WARNING • Your $streak-day streak will break today if you don\'t clear all quests.');
+  }
+
   // Developer tool button for testing daily reset
   void _forceNewDailyQuest() async {
     final prefs = await SharedPreferences.getInstance();
@@ -450,6 +479,21 @@ class _SystemHomePageState extends State<SystemHomePage> {
 
   int get xpBoostCost => 50 + (xpBoostLevel * 40);
   int get coinBoostCost => 50 + (coinBoostLevel * 40);
+
+  bool get _clearedToday => lastClearedDateKey == todayKey();
+
+  String _milestoneState(int m) {
+    // locked / ready / claimed
+    if (milestoneClaimedUpTo >= m) return 'CLAIMED';
+    if (streak >= m) return 'READY';
+    return 'LOCKED';
+  }
+
+  double _milestoneProgress(int m) {
+    if (m <= 0) return 0;
+    final v = streak / m;
+    return v.clamp(0, 1);
+  }
 
   Future<void> buyXpBoost() async {
     final cost = xpBoostCost;
@@ -599,6 +643,37 @@ class _SystemHomePageState extends State<SystemHomePage> {
                         ),
                         const SizedBox(height: 6),
                         Text('Today: ${b.dateKey}', style: TextStyle(color: Colors.white.withOpacity(0.45))),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _SystemCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'STREAK MILESTONES',
+                          style: TextStyle(letterSpacing: 1.2, fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 12),
+
+                        Row(
+                          children: [
+                            Expanded(child: _MilestoneChest(milestone: 3,  state: _milestoneState(3),  progress: _milestoneProgress(3))),
+                            const SizedBox(width: 10),
+                            Expanded(child: _MilestoneChest(milestone: 7,  state: _milestoneState(7),  progress: _milestoneProgress(7))),
+                            const SizedBox(width: 10),
+                            Expanded(child: _MilestoneChest(milestone: 14, state: _milestoneState(14), progress: _milestoneProgress(14))),
+                            const SizedBox(width: 10),
+                            Expanded(child: _MilestoneChest(milestone: 30, state: _milestoneState(30), progress: _milestoneProgress(30))),
+                          ],
+                        ),
+
+                        const SizedBox(height: 10),
+                        Text(
+                          'Milestones are rewarded automatically when you CLAIM ALL BONUS.',
+                          style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 12),
+                        ),
                       ],
                     ),
                   ),
@@ -901,6 +976,90 @@ class _SystemOverlayMessage extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MilestoneChest extends StatelessWidget {
+  final int milestone;
+  final String state; // LOCKED / READY / CLAIMED
+  final double progress;
+
+  const _MilestoneChest({
+    required this.milestone,
+    required this.state,
+    required this.progress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isReady = state == 'READY';
+    final isClaimed = state == 'CLAIMED';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isClaimed
+              ? const Color(0xFF3EF2D4).withOpacity(0.55)
+              : Colors.white.withOpacity(0.08),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isClaimed
+                    ? Icons.check_circle
+                    : isReady
+                        ? Icons.card_giftcard
+                        : Icons.lock,
+                size: 16,
+                color: isClaimed
+                    ? const Color(0xFF3EF2D4)
+                    : isReady
+                        ? const Color(0xFF3EF2D4)
+                        : Colors.white54,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '$milestone Days',
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 8,
+              backgroundColor: Colors.white.withOpacity(0.08),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            state,
+            style: TextStyle(
+              fontSize: 11,
+              letterSpacing: 1.0,
+              fontWeight: FontWeight.w800,
+              color: isClaimed
+                  ? const Color(0xFF3EF2D4)
+                  : isReady
+                      ? const Color(0xFF3EF2D4)
+                      : Colors.white54,
+            ),
+          ),
+        ],
       ),
     );
   }
