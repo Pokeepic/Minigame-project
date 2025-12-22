@@ -167,12 +167,31 @@ const List<QuestTemplate> questPool = [
 ];
 
 /// ---------- Title System ----------
+enum TitleRarity { common, rare, epic, legendary }
+
+class TitleBuff {
+  final double xpMult;      // e.g. 0.05 = +5%
+  final double coinMult;    // e.g. 0.05 = +5%
+  final int bonusXpFlat;    // e.g. +10 bonus XP on claim
+  final int bonusCoinsFlat; // e.g. +5 bonus coins on claim
+
+  const TitleBuff({
+    this.xpMult = 0,
+    this.coinMult = 0,
+    this.bonusXpFlat = 0,
+    this.bonusCoinsFlat = 0,
+  });
+}
+
 class TitleBadge {
   final String id;
   final String name;
-  final String flavor; // manhwa text
-  final String requirement; // display only
-  final bool Function(_SystemHomePageState s) unlockIf; // rule
+  final String flavor;
+  final String requirement; // shown if not hidden
+  final bool hidden;        // secret?
+  final TitleRarity rarity;
+  final TitleBuff buff;
+  final bool Function(_SystemHomePageState s) unlockIf;
 
   const TitleBadge({
     required this.id,
@@ -180,7 +199,37 @@ class TitleBadge {
     required this.flavor,
     required this.requirement,
     required this.unlockIf,
+    this.hidden = false,
+    this.rarity = TitleRarity.common,
+    this.buff = const TitleBuff(),
   });
+}
+
+String rarityLabel(TitleRarity r) {
+  switch (r) {
+    case TitleRarity.common: return 'COMMON';
+    case TitleRarity.rare: return 'RARE';
+    case TitleRarity.epic: return 'EPIC';
+    case TitleRarity.legendary: return 'LEGENDARY';
+  }
+}
+
+Color rarityColor(TitleRarity r) {
+  switch (r) {
+    case TitleRarity.common: return const Color(0xFF9CA3AF);      // gray
+    case TitleRarity.rare: return const Color(0xFF3EF2D4);        // your cyan
+    case TitleRarity.epic: return const Color(0xFFB794F4);        // purple
+    case TitleRarity.legendary: return const Color(0xFFF2D43E);   // gold
+  }
+}
+
+double rarityGlow(TitleRarity r) {
+  switch (r) {
+    case TitleRarity.common: return 6;
+    case TitleRarity.rare: return 10;
+    case TitleRarity.epic: return 14;
+    case TitleRarity.legendary: return 18;
+  }
 }
 
 final List<TitleBadge> titlePool = [
@@ -189,13 +238,19 @@ final List<TitleBadge> titlePool = [
     name: 'Rookie Awakened',
     flavor: 'The system has acknowledged your existence.',
     requirement: 'Start the app',
+    rarity: TitleRarity.common,
+    buff: TitleBuff(xpMult: 0.02),
     unlockIf: (s) => true,
   ),
+
+  // Streak
   TitleBadge(
     id: 'streak_3',
     name: 'Consistent Executor',
     flavor: 'You do not rely on motivation.',
     requirement: 'Reach a 3-day streak',
+    rarity: TitleRarity.rare,
+    buff: TitleBuff(xpMult: 0.04),
     unlockIf: (s) => s.streak >= 3,
   ),
   TitleBadge(
@@ -203,6 +258,8 @@ final List<TitleBadge> titlePool = [
     name: 'Discipline Holder',
     flavor: 'A week of control. Few can maintain it.',
     requirement: 'Reach a 7-day streak',
+    rarity: TitleRarity.epic,
+    buff: TitleBuff(xpMult: 0.06, coinMult: 0.03),
     unlockIf: (s) => s.streak >= 7,
   ),
   TitleBadge(
@@ -210,6 +267,8 @@ final List<TitleBadge> titlePool = [
     name: 'Iron Routine',
     flavor: 'Your habits are no longer fragile.',
     requirement: 'Reach a 14-day streak',
+    rarity: TitleRarity.epic,
+    buff: TitleBuff(xpMult: 0.07, bonusXpFlat: 10),
     unlockIf: (s) => s.streak >= 14,
   ),
   TitleBadge(
@@ -217,35 +276,71 @@ final List<TitleBadge> titlePool = [
     name: 'System Veteran',
     flavor: 'The system recognizes a long-term user.',
     requirement: 'Reach a 30-day streak',
+    rarity: TitleRarity.legendary,
+    buff: TitleBuff(xpMult: 0.10, coinMult: 0.06, bonusXpFlat: 20, bonusCoinsFlat: 10),
     unlockIf: (s) => s.streak >= 30,
   ),
-  TitleBadge(
-    id: 'level_5',
-    name: 'Rank Up Candidate',
-    flavor: 'Your growth rate is abnormal.',
-    requirement: 'Reach Level 5',
-    unlockIf: (s) => s.level >= 5,
-  ),
+
+  // Level
   TitleBadge(
     id: 'level_10',
     name: 'Awakened Specialist',
     flavor: 'You’ve surpassed the early wall.',
     requirement: 'Reach Level 10',
+    rarity: TitleRarity.rare,
+    buff: TitleBuff(coinMult: 0.05),
     unlockIf: (s) => s.level >= 10,
   ),
+
+  // Upgrades
   TitleBadge(
     id: 'upgrader',
     name: 'Optimization Addict',
     flavor: 'You sharpen your tools before battle.',
     requirement: 'Buy any upgrade',
+    rarity: TitleRarity.common,
+    buff: TitleBuff(bonusCoinsFlat: 5),
     unlockIf: (s) => (s.xpBoostLevel + s.coinBoostLevel) >= 1,
   ),
+
+  // Clears
   TitleBadge(
     id: 'clear_10',
     name: 'Quest Cleaner',
     flavor: 'No task survives your routine.',
     requirement: 'Clear Daily Quests 10 times',
+    rarity: TitleRarity.rare,
+    buff: TitleBuff(xpMult: 0.03, coinMult: 0.03),
     unlockIf: (s) => s.totalClears >= 10,
+  ),
+
+  // Hidden titles
+  TitleBadge(
+    id: 'midnight',
+    name: 'Midnight Operator',
+    flavor: 'You move when the world sleeps.',
+    requirement: '???',
+    hidden: true,
+    rarity: TitleRarity.epic,
+    buff: TitleBuff(xpMult: 0.06),
+    unlockIf: (s) {
+      final now = DateTime.now();
+      return now.hour >= 0 && now.hour <= 4; // opened app between 12am-4am
+    },
+  ),
+  TitleBadge(
+    id: 'no_spend_day',
+    name: 'Minimalist Protocol',
+    flavor: 'You resisted unnecessary optimization.',
+    requirement: '???',
+    hidden: true,
+    rarity: TitleRarity.legendary,
+    buff: TitleBuff(bonusXpFlat: 30),
+    unlockIf: (s) {
+      // unlock if you claimed bonus today AND bought no upgrades today
+      // (we'll support this in Step 5 using a "spentToday" flag)
+      return s._spentUpgradeToday == false && s._claimedBonusToday == true;
+    },
   ),
 ];
 
@@ -303,6 +398,9 @@ class StorageKeys {
   static const equippedTitleId = 'equippedTitleId';
   static const unlockedTitlesJson = 'unlockedTitlesJson';
   static const totalClears = 'totalClears';
+
+  static const spentUpgradeDayKey = 'spentUpgradeDayKey';
+  static const claimedBonusDayKey = 'claimedBonusDayKey';
 }
 
 class SystemHomePage extends StatefulWidget {
@@ -344,6 +442,10 @@ class _SystemHomePageState extends State<SystemHomePage> {
   Set<String> unlockedTitleIds = {'rookie'};
 
   int totalClears = 0; // number of times you press CLAIM ALL BONUS successfully
+
+  // Hidden title flags
+  bool _spentUpgradeToday = false;
+  bool _claimedBonusToday = false;
 
   bool loading = true;
 
@@ -512,6 +614,11 @@ class _SystemHomePageState extends State<SystemHomePage> {
   TitleBadge get equippedTitle =>
       titlePool.firstWhere((t) => t.id == equippedTitleId, orElse: () => titlePool.first);
 
+  double get titleXpMult => equippedTitle.buff.xpMult;
+  double get titleCoinMult => equippedTitle.buff.coinMult;
+  int get titleBonusXpFlat => equippedTitle.buff.bonusXpFlat;
+  int get titleBonusCoinsFlat => equippedTitle.buff.bonusCoinsFlat;
+
   Future<void> _evaluateTitleUnlocks() async {
     final newlyUnlocked = <TitleBadge>[];
 
@@ -560,8 +667,8 @@ class _SystemHomePageState extends State<SystemHomePage> {
 
     final t = templateById(b.templateIds[index]);
 
-    final xpMultiplier = 1.0 + (xpBoostLevel * 0.05);
-    final coinMultiplier = 1.0 + (coinBoostLevel * 0.05);
+    final xpMultiplier = 1.0 + (xpBoostLevel * 0.05) + titleXpMult;
+    final coinMultiplier = 1.0 + (coinBoostLevel * 0.05) + titleCoinMult;
 
     final gainedXp = (t.baseXp * xpMultiplier).round();
     final gainedCoins = (t.baseCoins * coinMultiplier).round();
@@ -616,8 +723,8 @@ class _SystemHomePageState extends State<SystemHomePage> {
     final xpMultiplier = 1.0 + (xpBoostLevel * 0.05);
     final coinMultiplier = 1.0 + (coinBoostLevel * 0.05);
 
-    final bonusXp = (baseBonusXp * xpMultiplier).round();
-    final bonusCoins = (baseBonusCoins * coinMultiplier).round();
+    final bonusXp = (baseBonusXp * xpMultiplier).round() + titleBonusXpFlat;
+    final bonusCoins = (baseBonusCoins * coinMultiplier).round() + titleBonusCoinsFlat;
 
     setState(() {
       dailyBundle = b.copyWith(bonusClaimed: true);
@@ -633,6 +740,8 @@ class _SystemHomePageState extends State<SystemHomePage> {
     });
 
     _updateStreakOnClearToday();
+
+    totalClears += 1;
 
     if (streak == 1) {
       await _addLog('streak', 'Streak Started — Day 1 🔥', data: {'streak': streak});
@@ -657,7 +766,23 @@ class _SystemHomePageState extends State<SystemHomePage> {
     if (milestoneMsg != null) {
       await _addLog('milestone', milestoneMsg, data: {'streak': streak});
     }
+
+    // Title bonus log
+    if (titleBonusXpFlat > 0 || titleBonusCoinsFlat > 0) {
+      await _addLog(
+        'title',
+        'Title Bonus Applied — +$titleBonusXpFlat XP, +$titleBonusCoinsFlat Coins (${equippedTitle.name})',
+        data: {'titleId': equippedTitle.id, 'xp': titleBonusXpFlat, 'coins': titleBonusCoinsFlat},
+      );
+    }
+
+    // Mark claimed today
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(StorageKeys.claimedBonusDayKey, todayKey());
+    _claimedBonusToday = true;
+
     await _saveAll();
+    await _evaluateTitleUnlocks();
   }
 
   void _updateStreakOnClearToday() {
