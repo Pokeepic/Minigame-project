@@ -166,6 +166,89 @@ const List<QuestTemplate> questPool = [
   ),
 ];
 
+/// ---------- Title System ----------
+class TitleBadge {
+  final String id;
+  final String name;
+  final String flavor; // manhwa text
+  final String requirement; // display only
+  final bool Function(_SystemHomePageState s) unlockIf; // rule
+
+  const TitleBadge({
+    required this.id,
+    required this.name,
+    required this.flavor,
+    required this.requirement,
+    required this.unlockIf,
+  });
+}
+
+final List<TitleBadge> titlePool = [
+  TitleBadge(
+    id: 'rookie',
+    name: 'Rookie Awakened',
+    flavor: 'The system has acknowledged your existence.',
+    requirement: 'Start the app',
+    unlockIf: (s) => true,
+  ),
+  TitleBadge(
+    id: 'streak_3',
+    name: 'Consistent Executor',
+    flavor: 'You do not rely on motivation.',
+    requirement: 'Reach a 3-day streak',
+    unlockIf: (s) => s.streak >= 3,
+  ),
+  TitleBadge(
+    id: 'streak_7',
+    name: 'Discipline Holder',
+    flavor: 'A week of control. Few can maintain it.',
+    requirement: 'Reach a 7-day streak',
+    unlockIf: (s) => s.streak >= 7,
+  ),
+  TitleBadge(
+    id: 'streak_14',
+    name: 'Iron Routine',
+    flavor: 'Your habits are no longer fragile.',
+    requirement: 'Reach a 14-day streak',
+    unlockIf: (s) => s.streak >= 14,
+  ),
+  TitleBadge(
+    id: 'streak_30',
+    name: 'System Veteran',
+    flavor: 'The system recognizes a long-term user.',
+    requirement: 'Reach a 30-day streak',
+    unlockIf: (s) => s.streak >= 30,
+  ),
+  TitleBadge(
+    id: 'level_5',
+    name: 'Rank Up Candidate',
+    flavor: 'Your growth rate is abnormal.',
+    requirement: 'Reach Level 5',
+    unlockIf: (s) => s.level >= 5,
+  ),
+  TitleBadge(
+    id: 'level_10',
+    name: 'Awakened Specialist',
+    flavor: 'You’ve surpassed the early wall.',
+    requirement: 'Reach Level 10',
+    unlockIf: (s) => s.level >= 10,
+  ),
+  TitleBadge(
+    id: 'upgrader',
+    name: 'Optimization Addict',
+    flavor: 'You sharpen your tools before battle.',
+    requirement: 'Buy any upgrade',
+    unlockIf: (s) => (s.xpBoostLevel + s.coinBoostLevel) >= 1,
+  ),
+  TitleBadge(
+    id: 'clear_10',
+    name: 'Quest Cleaner',
+    flavor: 'No task survives your routine.',
+    requirement: 'Clear Daily Quests 10 times',
+    unlockIf: (s) => s.totalClears >= 10,
+  ),
+];
+
 String rankLabel(int difficulty) {
   switch (difficulty) {
     case 1: return 'D';
@@ -216,6 +299,10 @@ class StorageKeys {
   static const lastAlertDateKey = 'lastAlertDateKey';
 
   static const systemLogJson = 'systemLogJson';
+
+  static const equippedTitleId = 'equippedTitleId';
+  static const unlockedTitlesJson = 'unlockedTitlesJson';
+  static const totalClears = 'totalClears';
 }
 
 class SystemHomePage extends StatefulWidget {
@@ -252,6 +339,12 @@ class _SystemHomePageState extends State<SystemHomePage> {
   List<SystemLogEntry> systemLog = [];
   static const int _maxLogs = 200;
 
+  // Title System
+  String equippedTitleId = 'rookie';
+  Set<String> unlockedTitleIds = {'rookie'};
+
+  int totalClears = 0; // number of times you press CLAIM ALL BONUS successfully
+
   bool loading = true;
 
   @override
@@ -281,6 +374,28 @@ class _SystemHomePageState extends State<SystemHomePage> {
     milestoneClaimedUpTo = prefs.getInt(StorageKeys.milestoneClaimedUpTo) ?? 0;
 
     lastAlertDateKey = prefs.getString(StorageKeys.lastAlertDateKey);
+
+    // Load title system
+    equippedTitleId = prefs.getString(StorageKeys.equippedTitleId) ?? 'rookie';
+    totalClears = prefs.getInt(StorageKeys.totalClears) ?? 0;
+
+    final unlockedStr = prefs.getString(StorageKeys.unlockedTitlesJson);
+    if (unlockedStr != null) {
+      try {
+        final list = (json.decode(unlockedStr) as List).cast<String>();
+        unlockedTitleIds = list.toSet();
+      } catch (_) {
+        unlockedTitleIds = {'rookie'};
+      }
+    } else {
+      unlockedTitleIds = {'rookie'};
+    }
+
+    // Ensure rookie always unlocked
+    unlockedTitleIds.add('rookie');
+
+    // Evaluate unlocks on load
+    await _evaluateTitleUnlocks();
 
     // Load daily bundle
     final jsonStr = prefs.getString(StorageKeys.dailyBundleJson);
@@ -385,7 +500,56 @@ class _SystemHomePageState extends State<SystemHomePage> {
     if (lastAlertDateKey != null) {
       await prefs.setString(StorageKeys.lastAlertDateKey, lastAlertDateKey!);
     }
+
+    // Save title system
+    await prefs.setString(StorageKeys.equippedTitleId, equippedTitleId);
+    await prefs.setString(StorageKeys.unlockedTitlesJson, json.encode(unlockedTitleIds.toList()));
+    await prefs.setInt(StorageKeys.totalClears, totalClears);
+
     await _saveDailyBundle(prefs);
+  }
+
+  TitleBadge get equippedTitle =>
+      titlePool.firstWhere((t) => t.id == equippedTitleId, orElse: () => titlePool.first);
+
+  Future<void> _evaluateTitleUnlocks() async {
+    final newlyUnlocked = <TitleBadge>[];
+
+    for (final t in titlePool) {
+      if (!unlockedTitleIds.contains(t.id) && t.unlockIf(this)) {
+        unlockedTitleIds.add(t.id);
+        newlyUnlocked.add(t);
+      }
+    }
+
+    if (newlyUnlocked.isNotEmpty) {
+      // auto-equip first new title if currently rookie
+      if (equippedTitleId == 'rookie') {
+        equippedTitleId = newlyUnlocked.first.id;
+      }
+
+      // show + log each unlock
+      for (final t in newlyUnlocked) {
+        showSystemMessage('TITLE UNLOCKED — ${t.name}');
+        await _addLog('title', 'Title Unlocked — ${t.name}', data: {'titleId': t.id, 'title': t.name});
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(StorageKeys.unlockedTitlesJson, json.encode(unlockedTitleIds.toList()));
+      await prefs.setString(StorageKeys.equippedTitleId, equippedTitleId);
+    }
+  }
+
+  Future<void> equipTitle(String id) async {
+    if (!unlockedTitleIds.contains(id)) return;
+
+    setState(() => equippedTitleId = id);
+
+    showSystemMessage('TITLE EQUIPPED — ${titlePool.firstWhere((t) => t.id == id).name}');
+    await _addLog('title', 'Title Equipped — ${titlePool.firstWhere((t) => t.id == id).name}', data: {'titleId': id});
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(StorageKeys.equippedTitleId, equippedTitleId);
   }
 
   void _completeQuestAt(int index) async {
@@ -1260,6 +1424,7 @@ class _SystemLogPageState extends State<SystemLogPage> {
       case 'level': return Icons.trending_up;
       case 'milestone': return Icons.emoji_events;
       case 'streak': return Icons.local_fire_department;
+      case 'title': return Icons.badge;
       default: return Icons.info_outline;
     }
   }
@@ -1272,6 +1437,7 @@ class _SystemLogPageState extends State<SystemLogPage> {
       case 'level': return const Color(0xFF58A6FF);
       case 'milestone': return const Color(0xFFF2D43E);
       case 'streak': return const Color(0xFFFF6B6B);
+      case 'title': return const Color(0xFFB794F4); // purple vibe
       default: return const Color(0xFF9CA3AF);
     }
   }
