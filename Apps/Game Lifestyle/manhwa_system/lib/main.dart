@@ -86,6 +86,30 @@ class DailyQuestBundle {
       );
 }
 
+class SystemLogEntry {
+  final int ts; // epoch ms
+  final String type; // quest, bonus, upgrade, level, streak, milestone, info
+  final String message;
+
+  const SystemLogEntry({
+    required this.ts,
+    required this.type,
+    required this.message,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'ts': ts,
+        'type': type,
+        'message': message,
+      };
+
+  static SystemLogEntry fromJson(Map<String, dynamic> json) => SystemLogEntry(
+        ts: json['ts'] as int,
+        type: json['type'] as String,
+        message: json['message'] as String,
+      );
+}
+
 /// ---------- Quest Pool (edit these anytime) ----------
 const List<QuestTemplate> questPool = [
   QuestTemplate(
@@ -186,6 +210,8 @@ class StorageKeys {
   static const milestoneClaimedUpTo = 'milestoneClaimedUpTo';
 
   static const lastAlertDateKey = 'lastAlertDateKey';
+
+  static const systemLogJson = 'systemLogJson';
 }
 
 class SystemHomePage extends StatefulWidget {
@@ -219,6 +245,9 @@ class _SystemHomePageState extends State<SystemHomePage> {
   // Daily Quest State
   DailyQuestBundle? dailyBundle;
 
+  List<SystemLogEntry> systemLog = [];
+  static const int _maxLogs = 200;
+
   bool loading = true;
 
   @override
@@ -229,6 +258,8 @@ class _SystemHomePageState extends State<SystemHomePage> {
 
   Future<void> _loadOrCreate() async {
     final prefs = await SharedPreferences.getInstance();
+
+    await _loadSystemLog(prefs);
 
     // Load player state
     level = prefs.getInt(StorageKeys.level) ?? 1;
@@ -267,6 +298,41 @@ class _SystemHomePageState extends State<SystemHomePage> {
 
     setState(() => loading = false);
     await _maybeShowStreakAlert();
+  }
+
+  Future<void> _loadSystemLog(SharedPreferences prefs) async {
+    final jsonStr = prefs.getString(StorageKeys.systemLogJson);
+    if (jsonStr == null) {
+      systemLog = [];
+      return;
+    }
+    try {
+      final list = (json.decode(jsonStr) as List).cast<Map<String, dynamic>>();
+      systemLog = list.map(SystemLogEntry.fromJson).toList();
+    } catch (_) {
+      systemLog = [];
+    }
+  }
+
+  Future<void> _saveSystemLog(SharedPreferences prefs) async {
+    final list = systemLog.take(_maxLogs).map((e) => e.toJson()).toList();
+    await prefs.setString(StorageKeys.systemLogJson, json.encode(list));
+  }
+
+  Future<void> _addLog(String type, String message) async {
+    final entry = SystemLogEntry(
+      ts: DateTime.now().millisecondsSinceEpoch,
+      type: type,
+      message: message,
+    );
+
+    setState(() {
+      systemLog.insert(0, entry); // newest first
+      if (systemLog.length > _maxLogs) systemLog = systemLog.take(_maxLogs).toList();
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    await _saveSystemLog(prefs);
   }
 
   DailyQuestBundle _generateDailyBundleFor(String dateKey) {
@@ -342,10 +408,16 @@ class _SystemHomePageState extends State<SystemHomePage> {
         xp -= xpToNext;
         level += 1;
         xpToNext = 100 + (level - 1) * 25;
+        // log each level up
+        _addLog('level', 'Level Up — Reached Level $level');
       }
     });
 
     showSystemMessage('Quest Completed • +$gainedXp XP • +$gainedCoins Coins');
+    await _addLog(
+      'quest',
+      'Quest Completed — ${t.title} (+$gainedXp XP, +$gainedCoins Coins)',
+    );
     await _saveAll();
   }
 
@@ -396,6 +468,13 @@ class _SystemHomePageState extends State<SystemHomePage> {
         : 'All Quests Cleared • BONUS +$bonusXp XP • +$bonusCoins Coins • STREAK $streak🔥';
 
     showSystemMessage(fullMsg);
+    await _addLog(
+      'bonus',
+      'All Quests Cleared — Bonus Claimed (+$bonusXp XP, +$bonusCoins Coins) • Streak $streak',
+    );
+    if (milestoneMsg != null) {
+      await _addLog('milestone', milestoneMsg);
+    }
     await _saveAll();
   }
 
@@ -506,6 +585,8 @@ class _SystemHomePageState extends State<SystemHomePage> {
 
     showSystemMessage('Upgrade Purchased — System Efficiency Lv $xpBoostLevel');
 
+    await _addLog('upgrade', 'Upgrade Purchased — System Efficiency Lv $xpBoostLevel (Cost $cost)');
+
     await _saveAll();
   }
 
@@ -519,6 +600,8 @@ class _SystemHomePageState extends State<SystemHomePage> {
     });
 
     showSystemMessage('Upgrade Purchased — Coin Magnet Lv $coinBoostLevel');
+
+    await _addLog('upgrade', 'Upgrade Purchased — Coin Magnet Lv $coinBoostLevel (Cost $cost)');
 
     await _saveAll();
   }
@@ -564,6 +647,15 @@ class _SystemHomePageState extends State<SystemHomePage> {
             tooltip: 'Dev: force reset',
             onPressed: _forceNewDailyQuest,
             icon: const Icon(Icons.refresh),
+          ),
+          IconButton(
+            tooltip: 'System Log',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => SystemLogPage(logs: systemLog)),
+              );
+            },
+            icon: const Icon(Icons.receipt_long),
           ),
         ],
       ),
@@ -659,13 +751,41 @@ class _SystemHomePageState extends State<SystemHomePage> {
 
                         Row(
                           children: [
-                            Expanded(child: _MilestoneChest(milestone: 3,  state: _milestoneState(3),  progress: _milestoneProgress(3))),
+                            Expanded(
+                              child: _MilestoneChest(
+                                milestone: 3,
+                                current: streak,
+                                state: _milestoneState(3),
+                                progress: _milestoneProgress(3),
+                              ),
+                            ),
                             const SizedBox(width: 10),
-                            Expanded(child: _MilestoneChest(milestone: 7,  state: _milestoneState(7),  progress: _milestoneProgress(7))),
+                            Expanded(
+                              child: _MilestoneChest(
+                                milestone: 7,
+                                current: streak,
+                                state: _milestoneState(7),
+                                progress: _milestoneProgress(7),
+                              ),
+                            ),
                             const SizedBox(width: 10),
-                            Expanded(child: _MilestoneChest(milestone: 14, state: _milestoneState(14), progress: _milestoneProgress(14))),
+                            Expanded(
+                              child: _MilestoneChest(
+                                milestone: 14,
+                                current: streak,
+                                state: _milestoneState(14),
+                                progress: _milestoneProgress(14),
+                              ),
+                            ),
                             const SizedBox(width: 10),
-                            Expanded(child: _MilestoneChest(milestone: 30, state: _milestoneState(30), progress: _milestoneProgress(30))),
+                            Expanded(
+                              child: _MilestoneChest(
+                                milestone: 30,
+                                current: streak,
+                                state: _milestoneState(30),
+                                progress: _milestoneProgress(30),
+                              ),
+                            ),
                           ],
                         ),
 
@@ -983,11 +1103,13 @@ class _SystemOverlayMessage extends StatelessWidget {
 
 class _MilestoneChest extends StatelessWidget {
   final int milestone;
-  final String state; // LOCKED / READY / CLAIMED
+  final int current; // <-- add this
+  final String state;
   final double progress;
 
   const _MilestoneChest({
     required this.milestone,
+    required this.current, // <-- add this
     required this.state,
     required this.progress,
   });
@@ -996,6 +1118,15 @@ class _MilestoneChest extends StatelessWidget {
   Widget build(BuildContext context) {
     final isReady = state == 'READY';
     final isClaimed = state == 'CLAIMED';
+
+    String _displayState(String state) {
+      switch (state) {
+        case 'LOCKED': return 'SYSTEM LOCKED';
+        case 'READY': return 'REWARD AVAILABLE';
+        case 'CLAIMED': return 'CLAIMED';
+        default: return state;
+      }
+    }
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -1047,7 +1178,7 @@ class _MilestoneChest extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '$streak / $milestone days',
+            '$current / $milestone days', // <-- use current, not streak
             style: TextStyle(
               fontSize: 11,
               color: Colors.white.withOpacity(0.6),
@@ -1056,7 +1187,7 @@ class _MilestoneChest extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            state,
+            _displayState(state),
             style: TextStyle(
               fontSize: 11,
               letterSpacing: 1.0,
@@ -1069,6 +1200,100 @@ class _MilestoneChest extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class SystemLogPage extends StatelessWidget {
+  final List<SystemLogEntry> logs;
+
+  const SystemLogPage({super.key, required this.logs});
+
+  IconData _iconFor(String type) {
+    switch (type) {
+      case 'quest': return Icons.task_alt;
+      case 'bonus': return Icons.card_giftcard;
+      case 'upgrade': return Icons.upgrade;
+      case 'level': return Icons.trending_up;
+      case 'milestone': return Icons.emoji_events;
+      case 'streak': return Icons.local_fire_department;
+      default: return Icons.info_outline;
+    }
+  }
+
+  String _formatTs(int ts) {
+    final d = DateTime.fromMillisecondsSinceEpoch(ts);
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${d.year}-${two(d.month)}-${two(d.day)}  ${two(d.hour)}:${two(d.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('SYSTEM LOG'),
+        centerTitle: true,
+        backgroundColor: const Color(0xFF0B0F17),
+        elevation: 0,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: logs.isEmpty
+            ? Center(
+                child: Text(
+                  'No logs yet.\nComplete quests to generate entries.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white.withOpacity(0.7)),
+                ),
+              )
+            : ListView.separated(
+                itemCount: logs.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, i) {
+                  final e = logs[i];
+                  return Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF111827),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFF3EF2D4).withOpacity(0.16)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(_iconFor(e.type), color: const Color(0xFF3EF2D4), size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _formatTs(e.ts),
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.55),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.3,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                e.message,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.2,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
       ),
     );
   }
