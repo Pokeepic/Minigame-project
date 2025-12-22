@@ -269,7 +269,7 @@ class _SystemHomePageState extends State<SystemHomePage> {
       }
     });
 
-    showSystemMessage('SYSTEM: Quest Completed  (+$gainedXp XP, +$gainedCoins Coins)');
+    showSystemMessage('Quest Completed  +$gainedXp XP  +$gainedCoins Coins');
 
     await _saveAll();
   }
@@ -297,7 +297,7 @@ class _SystemHomePageState extends State<SystemHomePage> {
       xpBoostLevel += 1;
     });
 
-    showSystemMessage('SYSTEM: Upgrade Purchased — System Efficiency Lv $xpBoostLevel');
+    showSystemMessage('Upgrade Purchased — System Efficiency Lv $xpBoostLevel');
 
     await _saveAll();
   }
@@ -311,7 +311,7 @@ class _SystemHomePageState extends State<SystemHomePage> {
       coinBoostLevel += 1;
     });
 
-    showSystemMessage('SYSTEM: Upgrade Purchased — Coin Magnet Lv $coinBoostLevel');
+    showSystemMessage('Upgrade Purchased — Coin Magnet Lv $coinBoostLevel');
 
     await _saveAll();
   }
@@ -348,12 +348,29 @@ class _SystemHomePageState extends State<SystemHomePage> {
               const Icon(Icons.bolt, size: 18, color: Color(0xFF3EF2D4)),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  message,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.3,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'SYSTEM',
+                      style: TextStyle(
+                        color: Color(0xFF3EF2D4),
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.2,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      message,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
