@@ -170,6 +170,9 @@ class _SystemHomePageState extends State<SystemHomePage> {
   int xpBoostLevel = 0;   // each level = +5% XP
   int coinBoostLevel = 0; // each level = +5% coins
 
+  String? systemMsg;
+  bool systemMsgVisible = false;
+
   // Daily Quest State
   DailyQuest? dailyQuest;
 
@@ -316,68 +319,23 @@ class _SystemHomePageState extends State<SystemHomePage> {
     await _saveAll();
   }
 
-  void showSystemMessage(String message) {
-    final messenger = ScaffoldMessenger.of(context);
+  Future<void> showSystemMessage(String message) async {
+    setState(() {
+      systemMsg = message;
+      systemMsgVisible = true;
+    });
 
-    messenger.clearSnackBars();
-    messenger.showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: const Color(0xFF0B0F17),
-        elevation: 0,
-        duration: const Duration(seconds: 2),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        content: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: const Color(0xFF111827),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: const Color(0xFF3EF2D4).withOpacity(0.35),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF3EF2D4).withOpacity(0.08),
-                blurRadius: 18,
-                spreadRadius: 2,
-              )
-            ],
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.bolt, size: 18, color: Color(0xFF3EF2D4)),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text(
-                      'SYSTEM',
-                      style: TextStyle(
-                        color: Color(0xFF3EF2D4),
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.2,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      message,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    // stay visible
+    await Future.delayed(const Duration(milliseconds: 1800));
+
+    if (!mounted) return;
+    setState(() => systemMsgVisible = false);
+
+    // give time to animate out
+    await Future.delayed(const Duration(milliseconds: 250));
+
+    if (!mounted) return;
+    setState(() => systemMsg = null);
   }
 
   @override
@@ -405,113 +363,124 @@ class _SystemHomePageState extends State<SystemHomePage> {
           ),
         ],
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _SystemCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('PLAYER STATUS', style: TextStyle(letterSpacing: 1.2, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 12),
-                    Row(
+      body: Stack(
+        children: [
+          // Your normal content
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _SystemCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Level $level',
-                                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 6),
-                              _XPBar(value: (xpToNext == 0) ? 0 : xp / xpToNext),
-                              const SizedBox(height: 6),
-                              Text('$xp / $xpToNext XP', style: TextStyle(color: Colors.white.withOpacity(0.75))),
-                            ],
+                        const Text('PLAYER STATUS', style: TextStyle(letterSpacing: 1.2, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Level $level',
+                                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                                  const SizedBox(height: 6),
+                                  _XPBar(value: (xpToNext == 0) ? 0 : xp / xpToNext),
+                                  const SizedBox(height: 6),
+                                  Text('$xp / $xpToNext XP', style: TextStyle(color: Colors.white.withOpacity(0.75))),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            _Chip(label: 'Coins', value: coins.toString()),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _SystemCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('DAILY QUEST', style: TextStyle(letterSpacing: 1.2, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 10),
+                        Text(t.description, style: const TextStyle(fontSize: 18)),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            _Chip(label: 'Title', value: t.title),
+                            const SizedBox(width: 10),
+                            _Chip(label: 'Rank', value: 'D${t.difficulty}'),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            _Chip(label: 'Reward', value: '+${(t.baseXp * (1.0 + xpBoostLevel * 0.05)).round()} XP'),
+                            const SizedBox(width: 10),
+                            _Chip(label: 'Reward', value: '+${(t.baseCoins * (1.0 + coinBoostLevel * 0.05)).round()} Coins'),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: q.completed ? null : _completeQuest,
+                            child: Text(q.completed ? 'COMPLETED' : 'COMPLETE'),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        _Chip(label: 'Coins', value: coins.toString()),
+                        const SizedBox(height: 6),
+                        Text('Today: ${q.dateKey}', style: TextStyle(color: Colors.white.withOpacity(0.45))),
                       ],
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              _SystemCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('DAILY QUEST', style: TextStyle(letterSpacing: 1.2, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 10),
-                    Text(t.description, style: const TextStyle(fontSize: 18)),
-                    const SizedBox(height: 10),
-                    Row(
+                  ),
+                  const SizedBox(height: 16),
+                  _SystemCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _Chip(label: 'Title', value: t.title),
-                        const SizedBox(width: 10),
-                        _Chip(label: 'Rank', value: 'D${t.difficulty}'),
+                        const Text(
+                          'UPGRADES (FAKE)',
+                          style: TextStyle(letterSpacing: 1.2, fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 12),
+
+                        _UpgradeRow(
+                          title: 'System Efficiency',
+                          subtitle: 'XP gain +${(xpBoostLevel * 5)}% (Next: +${((xpBoostLevel + 1) * 5)}%)',
+                          cost: xpBoostCost.toString(),
+                          enabled: coins >= xpBoostCost,
+                          onBuy: buyXpBoost,
+                          levelText: 'Lv $xpBoostLevel',
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        _UpgradeRow(
+                          title: 'Coin Magnet',
+                          subtitle: 'Coins +${(coinBoostLevel * 5)}% (Next: +${((coinBoostLevel + 1) * 5)}%)',
+                          cost: coinBoostCost.toString(),
+                          enabled: coins >= coinBoostCost,
+                          onBuy: buyCoinBoost,
+                          levelText: 'Lv $coinBoostLevel',
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        _Chip(label: 'Reward', value: '+${(t.baseXp * (1.0 + xpBoostLevel * 0.05)).round()} XP'),
-                        const SizedBox(width: 10),
-                        _Chip(label: 'Reward', value: '+${(t.baseCoins * (1.0 + coinBoostLevel * 0.05)).round()} Coins'),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: q.completed ? null : _completeQuest,
-                        child: Text(q.completed ? 'COMPLETED' : 'COMPLETE'),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text('Today: ${q.dateKey}', style: TextStyle(color: Colors.white.withOpacity(0.45))),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              _SystemCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'UPGRADES (FAKE)',
-                      style: TextStyle(letterSpacing: 1.2, fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 12),
-
-                    _UpgradeRow(
-                      title: 'System Efficiency',
-                      subtitle: 'XP gain +${(xpBoostLevel * 5)}% (Next: +${((xpBoostLevel + 1) * 5)}%)',
-                      cost: xpBoostCost.toString(),
-                      enabled: coins >= xpBoostCost,
-                      onBuy: buyXpBoost,
-                      levelText: 'Lv $xpBoostLevel',
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    _UpgradeRow(
-                      title: 'Coin Magnet',
-                      subtitle: 'Coins +${(coinBoostLevel * 5)}% (Next: +${((coinBoostLevel + 1) * 5)}%)',
-                      cost: coinBoostCost.toString(),
-                      enabled: coins >= coinBoostCost,
-                      onBuy: buyCoinBoost,
-                      levelText: 'Lv $coinBoostLevel',
-                    ),
-                  ],
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
+
+          // SYSTEM MESSAGE overlay (bottom)
+          if (systemMsg != null) _SystemOverlayMessage(
+            message: systemMsg!,
+            visible: systemMsgVisible,
+          ),
+        ],
       ),
     );
   }
@@ -625,6 +594,84 @@ class _UpgradeRow extends StatelessWidget {
           child: const Text('BUY'),
         ),
       ],
+    );
+  }
+}
+
+class _SystemOverlayMessage extends StatelessWidget {
+  final String message;
+  final bool visible;
+
+  const _SystemOverlayMessage({
+    required this.message,
+    required this.visible,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: 16,
+      right: 16,
+      bottom: 16,
+      child: AnimatedSlide(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+        offset: visible ? Offset.zero : const Offset(0, 0.15),
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 220),
+          opacity: visible ? 1 : 0,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111827),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: const Color(0xFF3EF2D4).withOpacity(0.6),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF3EF2D4).withOpacity(0.10),
+                  blurRadius: 20,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.bolt, color: Color(0xFF3EF2D4), size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'SYSTEM',
+                        style: TextStyle(
+                          color: Color(0xFF3EF2D4),
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.2,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        message,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          height: 1.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
