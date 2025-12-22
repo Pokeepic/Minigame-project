@@ -602,7 +602,7 @@ class _SystemHomePageState extends State<SystemHomePage> {
                               children: [
                                 _Chip(label: 'Coins', value: coins.toString()),
                                 const SizedBox(height: 10),
-                                _Chip(label: 'Streak', value: streak == 0 ? '-' : '$streak'),
+                                _Chip(label: 'Streak', value: '$streak 🔥'),
                                 const SizedBox(height: 10),
                                 _Chip(label: 'Best', value: bestStreak == 0 ? '-' : '$bestStreak'),
                               ],
@@ -1043,6 +1043,15 @@ class _MilestoneChest extends StatelessWidget {
               value: progress,
               minHeight: 8,
               backgroundColor: Colors.white.withOpacity(0.08),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$streak / $milestone days',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.white.withOpacity(0.6),
+              fontWeight: FontWeight.w600,
             ),
           ),
           const SizedBox(height: 8),
