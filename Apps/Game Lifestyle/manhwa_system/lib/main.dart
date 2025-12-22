@@ -90,23 +90,27 @@ class SystemLogEntry {
   final int ts; // epoch ms
   final String type; // quest, bonus, upgrade, level, streak, milestone, info
   final String message;
+  final Map<String, dynamic>? data; // <-- NEW (optional)
 
   const SystemLogEntry({
     required this.ts,
     required this.type,
     required this.message,
+    this.data,
   });
 
   Map<String, dynamic> toJson() => {
         'ts': ts,
         'type': type,
         'message': message,
+        if (data != null) 'data': data,
       };
 
   static SystemLogEntry fromJson(Map<String, dynamic> json) => SystemLogEntry(
         ts: json['ts'] as int,
         type: json['type'] as String,
         message: json['message'] as String,
+        data: (json['data'] as Map?)?.cast<String, dynamic>(),
       );
 }
 
@@ -319,16 +323,19 @@ class _SystemHomePageState extends State<SystemHomePage> {
     await prefs.setString(StorageKeys.systemLogJson, json.encode(list));
   }
 
-  Future<void> _addLog(String type, String message) async {
+  Future<void> _addLog(String type, String message, {Map<String, dynamic>? data}) async {
     final entry = SystemLogEntry(
       ts: DateTime.now().millisecondsSinceEpoch,
       type: type,
       message: message,
+      data: data,
     );
 
     setState(() {
-      systemLog.insert(0, entry); // newest first
-      if (systemLog.length > _maxLogs) systemLog = systemLog.take(_maxLogs).toList();
+      systemLog.insert(0, entry);
+      if (systemLog.length > _maxLogs) {
+        systemLog = systemLog.take(_maxLogs).toList();
+      }
     });
 
     final prefs = await SharedPreferences.getInstance();
@@ -409,7 +416,7 @@ class _SystemHomePageState extends State<SystemHomePage> {
         level += 1;
         xpToNext = 100 + (level - 1) * 25;
         // log each level up
-        _addLog('level', 'Level Up — Reached Level $level');
+        _addLog('level', 'Level Up — Reached Level $level', data: {'level': level});
       }
     });
 
@@ -417,6 +424,7 @@ class _SystemHomePageState extends State<SystemHomePage> {
     await _addLog(
       'quest',
       'Quest Completed — ${t.title} (+$gainedXp XP, +$gainedCoins Coins)',
+      data: {'xp': gainedXp, 'coins': gainedCoins, 'questId': t.id, 'title': t.title},
     );
     await _saveAll();
   }
@@ -462,6 +470,15 @@ class _SystemHomePageState extends State<SystemHomePage> {
 
     _updateStreakOnClearToday();
 
+    if (streak == 1) {
+      await _addLog('streak', 'Streak Started — Day 1 🔥', data: {'streak': streak});
+    } else if (streak == 3 || streak == 7 || streak == 14 || streak == 30) {
+      await _addLog('streak', 'SYSTEM NOTICE — $streak-Day Streak Achieved 🔥', data: {'streak': streak});
+      showSystemMessage('SYSTEM NOTICE — $streak-Day Streak Achieved 🔥');
+    } else {
+      await _addLog('streak', 'Streak Maintained — Day $streak', data: {'streak': streak});
+    }
+
     final milestoneMsg = _applyStreakMilestoneRewardsIfAny();
     final fullMsg = milestoneMsg != null
         ? 'All Quests Cleared • BONUS +$bonusXp XP • +$bonusCoins Coins • STREAK $streak🔥 • $milestoneMsg'
@@ -471,9 +488,10 @@ class _SystemHomePageState extends State<SystemHomePage> {
     await _addLog(
       'bonus',
       'All Quests Cleared — Bonus Claimed (+$bonusXp XP, +$bonusCoins Coins) • Streak $streak',
+      data: {'xp': bonusXp, 'coins': bonusCoins, 'streak': streak},
     );
     if (milestoneMsg != null) {
-      await _addLog('milestone', milestoneMsg);
+      await _addLog('milestone', milestoneMsg, data: {'streak': streak});
     }
     await _saveAll();
   }
@@ -585,7 +603,11 @@ class _SystemHomePageState extends State<SystemHomePage> {
 
     showSystemMessage('Upgrade Purchased — System Efficiency Lv $xpBoostLevel');
 
-    await _addLog('upgrade', 'Upgrade Purchased — System Efficiency Lv $xpBoostLevel (Cost $cost)');
+    await _addLog(
+      'upgrade',
+      'Upgrade Purchased — System Efficiency Lv $xpBoostLevel (Cost $cost)',
+      data: {'upgrade': 'xp', 'level': xpBoostLevel, 'cost': cost},
+    );
 
     await _saveAll();
   }
@@ -601,7 +623,11 @@ class _SystemHomePageState extends State<SystemHomePage> {
 
     showSystemMessage('Upgrade Purchased — Coin Magnet Lv $coinBoostLevel');
 
-    await _addLog('upgrade', 'Upgrade Purchased — Coin Magnet Lv $coinBoostLevel (Cost $cost)');
+    await _addLog(
+      'upgrade',
+      'Upgrade Purchased — Coin Magnet Lv $coinBoostLevel (Cost $cost)',
+      data: {'upgrade': 'coin', 'level': coinBoostLevel, 'cost': cost},
+    );
 
     await _saveAll();
   }
@@ -656,6 +682,15 @@ class _SystemHomePageState extends State<SystemHomePage> {
               );
             },
             icon: const Icon(Icons.receipt_long),
+          ),
+          IconButton(
+            tooltip: 'Analytics',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => AnalyticsPage(logs: systemLog)),
+              );
+            },
+            icon: const Icon(Icons.insights),
           ),
         ],
       ),
@@ -1205,10 +1240,17 @@ class _MilestoneChest extends StatelessWidget {
   }
 }
 
-class SystemLogPage extends StatelessWidget {
+class SystemLogPage extends StatefulWidget {
   final List<SystemLogEntry> logs;
-
   const SystemLogPage({super.key, required this.logs});
+
+  @override
+  State<SystemLogPage> createState() => _SystemLogPageState();
+}
+
+class _SystemLogPageState extends State<SystemLogPage> {
+  String filter = 'all'; // all, quest, bonus, upgrade, level, streak, milestone
+  String query = '';
 
   IconData _iconFor(String type) {
     switch (type) {
@@ -1222,14 +1264,49 @@ class SystemLogPage extends StatelessWidget {
     }
   }
 
+  Color _accentFor(String type) {
+    switch (type) {
+      case 'quest': return const Color(0xFF3EF2D4);
+      case 'bonus': return const Color(0xFF7CF5C6);
+      case 'upgrade': return const Color(0xFF3EF2D4);
+      case 'level': return const Color(0xFF58A6FF);
+      case 'milestone': return const Color(0xFFF2D43E);
+      case 'streak': return const Color(0xFFFF6B6B);
+      default: return const Color(0xFF9CA3AF);
+    }
+  }
+
+  String _dayKey(DateTime d) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${d.year}-${two(d.month)}-${two(d.day)}';
+  }
+
   String _formatTs(int ts) {
     final d = DateTime.fromMillisecondsSinceEpoch(ts);
     String two(int v) => v.toString().padLeft(2, '0');
-    return '${d.year}-${two(d.month)}-${two(d.day)}  ${two(d.hour)}:${two(d.minute)}';
+    return '${two(d.hour)}:${two(d.minute)}';
   }
 
   @override
   Widget build(BuildContext context) {
+    final logs = widget.logs.where((e) {
+      final okType = (filter == 'all') || e.type == filter;
+      final okQuery = query.isEmpty ||
+          e.message.toLowerCase().contains(query.toLowerCase());
+      return okType && okQuery;
+    }).toList();
+
+    // group by day
+    final Map<String, List<SystemLogEntry>> grouped = {};
+    for (final e in logs) {
+      final d = DateTime.fromMillisecondsSinceEpoch(e.ts);
+      final key = _dayKey(d);
+      grouped.putIfAbsent(key, () => []).add(e);
+    }
+
+    final dayKeys = grouped.keys.toList()
+      ..sort((a, b) => b.compareTo(a)); // newest day first
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('SYSTEM LOG'),
@@ -1239,62 +1316,367 @@ class SystemLogPage extends StatelessWidget {
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: logs.isEmpty
-            ? Center(
-                child: Text(
-                  'No logs yet.\nComplete quests to generate entries.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white.withOpacity(0.7)),
-                ),
-              )
-            : ListView.separated(
-                itemCount: logs.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (context, i) {
-                  final e = logs[i];
-                  return Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF111827),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFF3EF2D4).withOpacity(0.16)),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(_iconFor(e.type), color: const Color(0xFF3EF2D4), size: 20),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _formatTs(e.ts),
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.55),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.3,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                e.message,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w800,
-                                  height: 1.2,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
+        child: Column(
+          children: [
+            // Filter chips
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _chip('all', 'ALL'),
+                  _chip('quest', 'QUEST'),
+                  _chip('bonus', 'BONUS'),
+                  _chip('upgrade', 'UPGRADE'),
+                  _chip('level', 'LEVEL'),
+                  _chip('streak', 'STREAK'),
+                  _chip('milestone', 'MILESTONE'),
+                ],
               ),
+            ),
+            const SizedBox(height: 12),
+
+            // Search
+            TextField(
+              onChanged: (v) => setState(() => query = v.trim()),
+              decoration: InputDecoration(
+                hintText: 'Search system log…',
+                filled: true,
+                fillColor: const Color(0xFF111827),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: Colors.white.withOpacity(0.08)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: Colors.white.withOpacity(0.08)),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            Expanded(
+              child: logs.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No logs found.',
+                        style: TextStyle(color: Colors.white.withOpacity(0.7)),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: dayKeys.length,
+                      itemBuilder: (context, di) {
+                        final day = dayKeys[di];
+                        final items = grouped[day]!;
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              day,
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.6),
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.1,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            ...items.map((e) => _logCard(e)),
+                            const SizedBox(height: 18),
+                          ],
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
+
+  Widget _chip(String key, String label) {
+    final selected = filter == key;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        selected: selected,
+        label: Text(label),
+        onSelected: (_) => setState(() => filter = key),
+        labelStyle: TextStyle(
+          fontWeight: FontWeight.w800,
+          color: selected ? Colors.black : Colors.white.withOpacity(0.85),
+        ),
+        selectedColor: const Color(0xFF3EF2D4),
+        backgroundColor: const Color(0xFF111827),
+        side: BorderSide(color: Colors.white.withOpacity(0.08)),
+      ),
+    );
+  }
+
+  Widget _logCard(SystemLogEntry e) {
+    final accent = _accentFor(e.type);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accent.withOpacity(0.18)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(_iconFor(e.type), color: accent, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _formatTs(e.ts),
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.55),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  e.message,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AnalyticsPage extends StatelessWidget {
+  final List<SystemLogEntry> logs;
+  const AnalyticsPage({super.key, required this.logs});
+
+  String _dayKey(DateTime d) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${d.year}-${two(d.month)}-${two(d.day)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Aggregate per day
+    final Map<String, int> xpByDay = {};
+    final Map<String, int> coinsByDay = {};
+    final Map<String, int> clearsByDay = {};
+    final Map<String, int> streakByDay = {};
+
+    for (final e in logs) {
+      final day = _dayKey(DateTime.fromMillisecondsSinceEpoch(e.ts));
+      final data = e.data;
+
+      if (data != null) {
+        final xp = (data['xp'] is int) ? data['xp'] as int : 0;
+        final coins = (data['coins'] is int) ? data['coins'] as int : 0;
+
+        xpByDay[day] = (xpByDay[day] ?? 0) + xp;
+        coinsByDay[day] = (coinsByDay[day] ?? 0) + coins;
+
+        if (e.type == 'bonus') {
+          clearsByDay[day] = (clearsByDay[day] ?? 0) + 1;
+          final s = data['streak'];
+          if (s is int) streakByDay[day] = s;
+        }
+      }
+    }
+
+    // Last 7 days
+    final now = DateTime.now();
+    final last7 = List.generate(7, (i) {
+      final d = now.subtract(Duration(days: 6 - i));
+      return _dayKey(d);
+    });
+
+    final xp7 = last7.map((d) => xpByDay[d] ?? 0).toList();
+    final coins7 = last7.map((d) => coinsByDay[d] ?? 0).toList();
+    final clears7 = last7.map((d) => clearsByDay[d] ?? 0).toList();
+    final streak7 = last7.map((d) => streakByDay[d] ?? 0).toList();
+
+    // Discipline score (simple + motivating):
+    // 0..100 from 7-day clears + streak bonus
+    final clearRate = clears7.where((c) => c > 0).length / 7.0; // 0..1
+    final latestStreak = streak7.lastWhere((v) => v > 0, orElse: () => 0);
+    final score = (clearRate * 80 + (latestStreak.clamp(0, 30) / 30) * 20).round();
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('ANALYTICS'),
+        centerTitle: true,
+        backgroundColor: const Color(0xFF0B0F17),
+        elevation: 0,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: ListView(
+          children: [
+            _statCard('DISCIPLINE SCORE', '$score / 100'),
+            const SizedBox(height: 12),
+
+            _barCard('XP (Last 7 Days)', last7, xp7),
+            const SizedBox(height: 12),
+
+            _barCard('COINS (Last 7 Days)', last7, coins7),
+            const SizedBox(height: 12),
+
+            _miniLineCard('STREAK TREND (Last 7 Days)', last7, streak7),
+            const SizedBox(height: 12),
+
+            _statCard('CLEARS (Last 7 Days)', '${clears7.where((c) => c > 0).length} / 7 days cleared'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statCard(String title, String value) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFF3EF2D4).withOpacity(0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: TextStyle(color: Colors.white.withOpacity(0.6), fontWeight: FontWeight.w900, letterSpacing: 1.1)),
+          const SizedBox(height: 10),
+          Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+        ],
+      ),
+    );
+  }
+
+  Widget _barCard(String title, List<String> labels, List<int> values) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: TextStyle(color: Colors.white.withOpacity(0.85), fontWeight: FontWeight.w900)),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 120,
+            child: CustomPaint(
+              painter: _BarPainter(values),
+              child: Container(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: labels.map((d) => Text(d.substring(5), style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10))).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniLineCard(String title, List<String> labels, List<int> values) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: TextStyle(color: Colors.white.withOpacity(0.85), fontWeight: FontWeight.w900)),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 110,
+            child: CustomPaint(
+              painter: _LinePainter(values),
+              child: Container(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: labels.map((d) => Text(d.substring(5), style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10))).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BarPainter extends CustomPainter {
+  final List<int> values;
+  _BarPainter(this.values);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final maxV = values.isEmpty ? 1 : (values.reduce((a, b) => a > b ? a : b)).clamp(1, 1 << 30);
+    final paint = Paint()..color = const Color(0xFF3EF2D4).withOpacity(0.8);
+
+    final n = values.length;
+    final gap = 6.0;
+    final barW = (size.width - gap * (n - 1)) / n;
+
+    for (int i = 0; i < n; i++) {
+      final h = (values[i] / maxV) * size.height;
+      final r = Rect.fromLTWH(i * (barW + gap), size.height - h, barW, h);
+      canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(6)), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BarPainter oldDelegate) => oldDelegate.values != values;
+}
+
+class _LinePainter extends CustomPainter {
+  final List<int> values;
+  _LinePainter(this.values);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.length < 2) return;
+
+    final maxV = (values.reduce((a, b) => a > b ? a : b)).clamp(1, 1 << 30);
+    final p = Paint()
+      ..color = const Color(0xFF3EF2D4).withOpacity(0.9)
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final dx = size.width / (values.length - 1);
+
+    final path = Path();
+    for (int i = 0; i < values.length; i++) {
+      final x = i * dx;
+      final y = size.height - (values[i] / maxV) * size.height;
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    canvas.drawPath(path, p);
+  }
+
+  @override
+  bool shouldRepaint(covariant _LinePainter oldDelegate) => oldDelegate.values != values;
 }
