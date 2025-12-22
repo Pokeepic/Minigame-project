@@ -47,33 +47,42 @@ class QuestTemplate {
   });
 }
 
-class DailyQuest {
+class DailyQuestBundle {
   final String dateKey; // yyyy-mm-dd
-  final String templateId;
-  final bool completed;
+  final List<String> templateIds; // length 3
+  final List<bool> completed; // length 3
+  final bool bonusClaimed;
 
-  const DailyQuest({
+  const DailyQuestBundle({
     required this.dateKey,
-    required this.templateId,
+    required this.templateIds,
     required this.completed,
+    required this.bonusClaimed,
   });
 
-  DailyQuest copyWith({bool? completed}) => DailyQuest(
+  DailyQuestBundle copyWith({
+    List<bool>? completed,
+    bool? bonusClaimed,
+  }) =>
+      DailyQuestBundle(
         dateKey: dateKey,
-        templateId: templateId,
+        templateIds: templateIds,
         completed: completed ?? this.completed,
+        bonusClaimed: bonusClaimed ?? this.bonusClaimed,
       );
 
   Map<String, dynamic> toJson() => {
         'dateKey': dateKey,
-        'templateId': templateId,
+        'templateIds': templateIds,
         'completed': completed,
+        'bonusClaimed': bonusClaimed,
       };
 
-  static DailyQuest fromJson(Map<String, dynamic> json) => DailyQuest(
+  static DailyQuestBundle fromJson(Map<String, dynamic> json) => DailyQuestBundle(
         dateKey: json['dateKey'] as String,
-        templateId: json['templateId'] as String,
-        completed: json['completed'] as bool,
+        templateIds: (json['templateIds'] as List).cast<String>(),
+        completed: (json['completed'] as List).cast<bool>(),
+        bonusClaimed: (json['bonusClaimed'] as bool?) ?? false,
       );
 }
 
@@ -129,6 +138,16 @@ const List<QuestTemplate> questPool = [
   ),
 ];
 
+String rankLabel(int difficulty) {
+  switch (difficulty) {
+    case 1: return 'D';
+    case 2: return 'C';
+    case 3: return 'B';
+    case 4: return 'A';
+    default: return 'S';
+  }
+}
+
 QuestTemplate templateById(String id) =>
     questPool.firstWhere((q) => q.id == id, orElse: () => questPool.first);
 
@@ -147,7 +166,7 @@ class StorageKeys {
   static const xpToNext = 'xpToNext';
   static const coins = 'coins';
 
-  static const dailyQuestJson = 'dailyQuestJson';
+  static const dailyBundleJson = 'dailyBundleJson';
 
   static const xpBoostLevel = 'xpBoostLevel';
   static const coinBoostLevel = 'coinBoostLevel';
@@ -174,7 +193,7 @@ class _SystemHomePageState extends State<SystemHomePage> {
   bool systemMsgVisible = false;
 
   // Daily Quest State
-  DailyQuest? dailyQuest;
+  DailyQuestBundle? dailyBundle;
 
   bool loading = true;
 
@@ -196,37 +215,51 @@ class _SystemHomePageState extends State<SystemHomePage> {
     xpBoostLevel = prefs.getInt(StorageKeys.xpBoostLevel) ?? 0;
     coinBoostLevel = prefs.getInt(StorageKeys.coinBoostLevel) ?? 0;
 
-    // Load daily quest
-    final jsonStr = prefs.getString(StorageKeys.dailyQuestJson);
+    // Load daily bundle
+    final jsonStr = prefs.getString(StorageKeys.dailyBundleJson);
     if (jsonStr != null) {
       try {
         final map = json.decode(jsonStr) as Map<String, dynamic>;
-        dailyQuest = DailyQuest.fromJson(map);
+        dailyBundle = DailyQuestBundle.fromJson(map);
       } catch (_) {
-        dailyQuest = null;
+        dailyBundle = null;
       }
     }
 
-    // Ensure today's quest exists
+    // Ensure today's bundle exists
     final tKey = todayKey();
-    if (dailyQuest == null || dailyQuest!.dateKey != tKey) {
-      dailyQuest = _generateDailyQuestFor(tKey);
-      await _saveDailyQuest(prefs);
+    if (dailyBundle == null || dailyBundle!.dateKey != tKey) {
+      dailyBundle = _generateDailyBundleFor(tKey);
+      await _saveDailyBundle(prefs);
     }
 
     setState(() => loading = false);
   }
 
-  DailyQuest _generateDailyQuestFor(String dateKey) {
-    // Deterministic-ish daily randomness (so it won't keep changing)
-    // We seed with dateKey hash so today's quest stays same all day.
-    final seed = dateKey.hashCode;
-    final rng = Random(seed);
+  DailyQuestBundle _generateDailyBundleFor(String dateKey) {
+    // deterministic daily set
+    final rng = Random(dateKey.hashCode);
 
-    // Weighted pick: prefer mixed difficulties, but keep it simple for V1
-    final picked = questPool[rng.nextInt(questPool.length)];
+    // We pick 3 UNIQUE quests
+    final ids = <String>{};
+    while (ids.length < 3) {
+      ids.add(questPool[rng.nextInt(questPool.length)].id);
+    }
 
-    return DailyQuest(dateKey: dateKey, templateId: picked.id, completed: false);
+    return DailyQuestBundle(
+      dateKey: dateKey,
+      templateIds: ids.toList(),
+      completed: [false, false, false],
+      bonusClaimed: false,
+    );
+  }
+
+  Future<void> _saveDailyBundle(SharedPreferences prefs) async {
+    if (dailyBundle == null) return;
+    await prefs.setString(
+      StorageKeys.dailyBundleJson,
+      json.encode(dailyBundle!.toJson()),
+    );
   }
 
   Future<void> _saveAll() async {
@@ -237,21 +270,17 @@ class _SystemHomePageState extends State<SystemHomePage> {
     await prefs.setInt(StorageKeys.coins, coins);
     await prefs.setInt(StorageKeys.xpBoostLevel, xpBoostLevel);
     await prefs.setInt(StorageKeys.coinBoostLevel, coinBoostLevel);
-    await _saveDailyQuest(prefs);
+    await _saveDailyBundle(prefs);
   }
 
-  Future<void> _saveDailyQuest(SharedPreferences prefs) async {
-    if (dailyQuest == null) return;
-    await prefs.setString(StorageKeys.dailyQuestJson, json.encode(dailyQuest!.toJson()));
-  }
+  void _completeQuestAt(int index) async {
+    final b = dailyBundle;
+    if (b == null) return;
+    if (index < 0 || index >= b.templateIds.length) return;
+    if (b.completed[index]) return;
 
-  void _completeQuest() async {
-    final q = dailyQuest;
-    if (q == null || q.completed) return;
+    final t = templateById(b.templateIds[index]);
 
-    final t = templateById(q.templateId);
-
-    // Rewards (upgrades multipliers later)
     final xpMultiplier = 1.0 + (xpBoostLevel * 0.05);
     final coinMultiplier = 1.0 + (coinBoostLevel * 0.05);
 
@@ -259,7 +288,9 @@ class _SystemHomePageState extends State<SystemHomePage> {
     final gainedCoins = (t.baseCoins * coinMultiplier).round();
 
     setState(() {
-      dailyQuest = q.copyWith(completed: true);
+      final newCompleted = [...b.completed];
+      newCompleted[index] = true;
+      dailyBundle = b.copyWith(completed: newCompleted);
 
       xp += gainedXp;
       coins += gainedCoins;
@@ -272,8 +303,50 @@ class _SystemHomePageState extends State<SystemHomePage> {
       }
     });
 
-    showSystemMessage('Quest Completed  +$gainedXp XP  +$gainedCoins Coins');
+    showSystemMessage('Quest Completed • +$gainedXp XP • +$gainedCoins Coins');
+    await _saveAll();
+  }
 
+  bool get _allDone {
+    final b = dailyBundle;
+    if (b == null) return false;
+    return b.completed.every((x) => x);
+  }
+
+  void _claimAllBonus() async {
+    final b = dailyBundle;
+    if (b == null) return;
+    if (!_allDone) return;
+    if (b.bonusClaimed) return;
+
+    // Bonus scales with difficulty sum (feels like a system)
+    final templates = b.templateIds.map(templateById).toList();
+    final totalDifficulty = templates.fold<int>(0, (sum, t) => sum + t.difficulty);
+
+    // Base bonus
+    final baseBonusXp = 20 + totalDifficulty * 10;     // example: 50..?
+    final baseBonusCoins = 15 + totalDifficulty * 8;
+
+    final xpMultiplier = 1.0 + (xpBoostLevel * 0.05);
+    final coinMultiplier = 1.0 + (coinBoostLevel * 0.05);
+
+    final bonusXp = (baseBonusXp * xpMultiplier).round();
+    final bonusCoins = (baseBonusCoins * coinMultiplier).round();
+
+    setState(() {
+      dailyBundle = b.copyWith(bonusClaimed: true);
+
+      xp += bonusXp;
+      coins += bonusCoins;
+
+      while (xp >= xpToNext) {
+        xp -= xpToNext;
+        level += 1;
+        xpToNext = 100 + (level - 1) * 25;
+      }
+    });
+
+    showSystemMessage('All Quests Cleared • BONUS +$bonusXp XP • +$bonusCoins Coins');
     await _saveAll();
   }
 
@@ -283,8 +356,8 @@ class _SystemHomePageState extends State<SystemHomePage> {
     final fakeDate = DateTime.now().subtract(const Duration(days: 1));
     final key =
         '${fakeDate.year.toString().padLeft(4, '0')}-${fakeDate.month.toString().padLeft(2, '0')}-${fakeDate.day.toString().padLeft(2, '0')}';
-    dailyQuest = _generateDailyQuestFor(key);
-    await _saveDailyQuest(prefs);
+    dailyBundle = _generateDailyBundleFor(key);
+    await _saveDailyBundle(prefs);
     await _loadOrCreate();
   }
 
@@ -346,8 +419,8 @@ class _SystemHomePageState extends State<SystemHomePage> {
       );
     }
 
-    final q = dailyQuest!;
-    final t = templateById(q.templateId);
+    final b = dailyBundle!;
+    final templates = b.templateIds.map(templateById).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -405,35 +478,32 @@ class _SystemHomePageState extends State<SystemHomePage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('DAILY QUEST', style: TextStyle(letterSpacing: 1.2, fontWeight: FontWeight.w700)),
+                        const Text('DAILY QUESTS', style: TextStyle(letterSpacing: 1.2, fontWeight: FontWeight.w700)),
                         const SizedBox(height: 10),
-                        Text(t.description, style: const TextStyle(fontSize: 18)),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            _Chip(label: 'Title', value: t.title),
-                            const SizedBox(width: 10),
-                            _Chip(label: 'Rank', value: 'D${t.difficulty}'),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            _Chip(label: 'Reward', value: '+${(t.baseXp * (1.0 + xpBoostLevel * 0.05)).round()} XP'),
-                            const SizedBox(width: 10),
-                            _Chip(label: 'Reward', value: '+${(t.baseCoins * (1.0 + coinBoostLevel * 0.05)).round()} Coins'),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
+
+                        for (int i = 0; i < templates.length; i++) ...[
+                          _DailyQuestRow(
+                            title: templates[i].title,
+                            description: templates[i].description,
+                            rank: rankLabel(templates[i].difficulty),
+                            rewardXp: (templates[i].baseXp * (1.0 + xpBoostLevel * 0.05)).round(),
+                            rewardCoins: (templates[i].baseCoins * (1.0 + coinBoostLevel * 0.05)).round(),
+                            completed: b.completed[i],
+                            onComplete: () => _completeQuestAt(i),
+                          ),
+                          if (i != templates.length - 1) const SizedBox(height: 12),
+                        ],
+
+                        const SizedBox(height: 14),
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton(
-                            onPressed: q.completed ? null : _completeQuest,
-                            child: Text(q.completed ? 'COMPLETED' : 'COMPLETE'),
+                            onPressed: (_allDone && !b.bonusClaimed) ? _claimAllBonus : null,
+                            child: Text(b.bonusClaimed ? 'BONUS CLAIMED' : 'CLAIM ALL BONUS'),
                           ),
                         ),
                         const SizedBox(height: 6),
-                        Text('Today: ${q.dateKey}', style: TextStyle(color: Colors.white.withOpacity(0.45))),
+                        Text('Today: ${b.dateKey}', style: TextStyle(color: Colors.white.withOpacity(0.45))),
                       ],
                     ),
                   ),
@@ -548,6 +618,71 @@ class _XPBar extends StatelessWidget {
         value: value.clamp(0, 1),
         minHeight: 10,
         backgroundColor: Colors.white.withOpacity(0.10),
+      ),
+    );
+  }
+}
+
+class _DailyQuestRow extends StatelessWidget {
+  final String title;
+  final String description;
+  final String rank; // D/C/B/A/S
+  final int rewardXp;
+  final int rewardCoins;
+  final bool completed;
+  final VoidCallback onComplete;
+
+  const _DailyQuestRow({
+    required this.title,
+    required this.description,
+    required this.rank,
+    required this.rewardXp,
+    required this.rewardCoins,
+    required this.completed,
+    required this.onComplete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 10),
+              _Chip(label: 'Rank', value: rank),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(description, style: TextStyle(color: Colors.white.withOpacity(0.85))),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _Chip(label: 'XP', value: '+$rewardXp'),
+              const SizedBox(width: 10),
+              _Chip(label: 'Coins', value: '+$rewardCoins'),
+              const Spacer(),
+              ElevatedButton(
+                onPressed: completed ? null : onComplete,
+                child: Text(completed ? 'DONE' : 'COMPLETE'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
