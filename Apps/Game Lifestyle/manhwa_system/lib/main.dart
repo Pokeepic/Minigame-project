@@ -159,6 +159,14 @@ String todayKey() {
       '${now.day.toString().padLeft(2, '0')}';
 }
 
+String dateKeyFrom(DateTime d) {
+  return '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+}
+
+String yesterdayKey() => dateKeyFrom(DateTime.now().subtract(const Duration(days: 1)));
+
 /// ---------- Storage ----------
 class StorageKeys {
   static const level = 'level';
@@ -170,7 +178,12 @@ class StorageKeys {
 
   static const xpBoostLevel = 'xpBoostLevel';
   static const coinBoostLevel = 'coinBoostLevel';
-}
+
+  static const streak = 'streak';
+  static const bestStreak = 'bestStreak';
+  static const lastClearedDateKey = 'lastClearedDateKey';
+
+  static const milestoneClaimedUpTo = 'milestoneClaimedUpTo';
 
 class SystemHomePage extends StatefulWidget {
   const SystemHomePage({super.key});
@@ -188,6 +201,12 @@ class _SystemHomePageState extends State<SystemHomePage> {
 
   int xpBoostLevel = 0;   // each level = +5% XP
   int coinBoostLevel = 0; // each level = +5% coins
+
+  int streak = 0;
+  int bestStreak = 0;
+  String? lastClearedDateKey;
+
+  int milestoneClaimedUpTo = 0;
 
   String? systemMsg;
   bool systemMsgVisible = false;
@@ -214,6 +233,12 @@ class _SystemHomePageState extends State<SystemHomePage> {
 
     xpBoostLevel = prefs.getInt(StorageKeys.xpBoostLevel) ?? 0;
     coinBoostLevel = prefs.getInt(StorageKeys.coinBoostLevel) ?? 0;
+
+    streak = prefs.getInt(StorageKeys.streak) ?? 0;
+    bestStreak = prefs.getInt(StorageKeys.bestStreak) ?? 0;
+    lastClearedDateKey = prefs.getString(StorageKeys.lastClearedDateKey);
+
+    milestoneClaimedUpTo = prefs.getInt(StorageKeys.milestoneClaimedUpTo) ?? 0;
 
     // Load daily bundle
     final jsonStr = prefs.getString(StorageKeys.dailyBundleJson);
@@ -270,6 +295,12 @@ class _SystemHomePageState extends State<SystemHomePage> {
     await prefs.setInt(StorageKeys.coins, coins);
     await prefs.setInt(StorageKeys.xpBoostLevel, xpBoostLevel);
     await prefs.setInt(StorageKeys.coinBoostLevel, coinBoostLevel);
+    await prefs.setInt(StorageKeys.streak, streak);
+    await prefs.setInt(StorageKeys.bestStreak, bestStreak);
+    if (lastClearedDateKey != null) {
+      await prefs.setString(StorageKeys.lastClearedDateKey, lastClearedDateKey!);
+    }
+    await prefs.setInt(StorageKeys.milestoneClaimedUpTo, milestoneClaimedUpTo);
     await _saveDailyBundle(prefs);
   }
 
@@ -346,8 +377,64 @@ class _SystemHomePageState extends State<SystemHomePage> {
       }
     });
 
-    showSystemMessage('All Quests Cleared • BONUS +$bonusXp XP • +$bonusCoins Coins');
+    _updateStreakOnClearToday();
+
+    final milestoneMsg = _applyStreakMilestoneRewardsIfAny();
+    final fullMsg = milestoneMsg != null
+        ? 'All Quests Cleared • BONUS +$bonusXp XP • +$bonusCoins Coins • STREAK $streak🔥 • $milestoneMsg'
+        : 'All Quests Cleared • BONUS +$bonusXp XP • +$bonusCoins Coins • STREAK $streak🔥';
+
+    showSystemMessage(fullMsg);
     await _saveAll();
+  }
+
+  void _updateStreakOnClearToday() {
+    final today = todayKey();
+    final yKey = yesterdayKey();
+
+    // If already counted today, do nothing
+    if (lastClearedDateKey == today) return;
+
+    if (lastClearedDateKey == yKey) {
+      streak += 1;
+    } else {
+      streak = 1;
+    }
+
+    lastClearedDateKey = today;
+    if (streak > bestStreak) bestStreak = streak;
+  }
+
+  String? _applyStreakMilestoneRewardsIfAny() {
+    const milestones = [7, 14, 30, 50, 100];
+    if (!milestones.contains(streak)) return null;
+    if (streak <= milestoneClaimedUpTo) return null;
+
+    // Rewards scale with milestone
+    final index = milestones.indexOf(streak);
+    final baseXp = 50 + index * 50; // 50, 100, 150, 200, 250
+    final baseCoins = 25 + index * 25; // 25, 50, 75, 100, 125
+
+    final xpMultiplier = 1.0 + (xpBoostLevel * 0.05);
+    final coinMultiplier = 1.0 + (coinBoostLevel * 0.05);
+
+    final rewardXp = (baseXp * xpMultiplier).round();
+    final rewardCoins = (baseCoins * coinMultiplier).round();
+
+    setState(() {
+      xp += rewardXp;
+      coins += rewardCoins;
+
+      while (xp >= xpToNext) {
+        xp -= xpToNext;
+        level += 1;
+        xpToNext = 100 + (level - 1) * 25;
+      }
+
+      milestoneClaimedUpTo = streak;
+    });
+
+    return 'MILESTONE REACHED! +$rewardXp XP +$rewardCoins Coins';
   }
 
   // Developer tool button for testing daily reset
@@ -467,7 +554,15 @@ class _SystemHomePageState extends State<SystemHomePage> {
                               ),
                             ),
                             const SizedBox(width: 12),
-                            _Chip(label: 'Coins', value: coins.toString()),
+                            Column(
+                              children: [
+                                _Chip(label: 'Coins', value: coins.toString()),
+                                const SizedBox(height: 10),
+                                _Chip(label: 'Streak', value: streak == 0 ? '-' : '$streak'),
+                                const SizedBox(height: 10),
+                                _Chip(label: 'Best', value: bestStreak == 0 ? '-' : '$bestStreak'),
+                              ],
+                            ),
                           ],
                         ),
                       ],
