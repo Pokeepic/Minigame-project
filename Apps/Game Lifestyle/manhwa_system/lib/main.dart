@@ -114,6 +114,40 @@ class SystemLogEntry {
       );
 }
 
+class TitleMasteryState {
+  final int level; // 1..10
+  final int xp;    // progress within this level
+  final int xpToNext;
+
+  const TitleMasteryState({
+    required this.level,
+    required this.xp,
+    required this.xpToNext,
+  });
+
+  TitleMasteryState copyWith({int? level, int? xp, int? xpToNext}) => TitleMasteryState(
+    level: level ?? this.level,
+    xp: xp ?? this.xp,
+    xpToNext: xpToNext ?? this.xpToNext,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'level': level,
+    'xp': xp,
+    'xpToNext': xpToNext,
+  };
+
+  static TitleMasteryState fromJson(Map<String, dynamic> json) => TitleMasteryState(
+    level: (json['level'] as num).toInt(),
+    xp: (json['xp'] as num).toInt(),
+    xpToNext: (json['xpToNext'] as num).toInt(),
+  );
+
+  static TitleMasteryState fresh() => const TitleMasteryState(level: 1, xp: 0, xpToNext: 60);
+}
+
+int masteryXpToNext(int masteryLevel) => 60 + (masteryLevel - 1) * 35; // tune later
+
 /// ---------- Quest Pool (edit these anytime) ----------
 const List<QuestTemplate> questPool = [
   QuestTemplate(
@@ -401,6 +435,8 @@ class StorageKeys {
 
   static const spentUpgradeDayKey = 'spentUpgradeDayKey';
   static const claimedBonusDayKey = 'claimedBonusDayKey';
+
+  static const titleMasteryJson = 'titleMasteryJson';
 }
 
 class SystemHomePage extends StatefulWidget {
@@ -440,6 +476,7 @@ class _SystemHomePageState extends State<SystemHomePage> {
   // Title System
   String equippedTitleId = 'rookie';
   Set<String> unlockedTitleIds = {'rookie'};
+  Map<String, TitleMasteryState> titleMastery = {};
 
   int totalClears = 0; // number of times you press CLAIM ALL BONUS successfully
 
@@ -459,6 +496,8 @@ class _SystemHomePageState extends State<SystemHomePage> {
     final prefs = await SharedPreferences.getInstance();
 
     await _loadSystemLog(prefs);
+
+    final tKey = todayKey();
 
     // Load player state
     level = prefs.getInt(StorageKeys.level) ?? 1;
@@ -496,6 +535,29 @@ class _SystemHomePageState extends State<SystemHomePage> {
     // Ensure rookie always unlocked
     unlockedTitleIds.add('rookie');
 
+    // Load hidden title flags
+    final spentKey = prefs.getString(StorageKeys.spentUpgradeDayKey);
+    _spentUpgradeToday = (spentKey == tKey);
+
+    final claimKey = prefs.getString(StorageKeys.claimedBonusDayKey);
+    _claimedBonusToday = (claimKey == tKey);
+
+    // Load mastery
+    final masteryStr = prefs.getString(StorageKeys.titleMasteryJson);
+    if (masteryStr != null) {
+      try {
+        final map = json.decode(masteryStr) as Map<String, dynamic>;
+        titleMastery = map.map((k, v) => MapEntry(k, TitleMasteryState.fromJson((v as Map).cast<String, dynamic>())));
+      } catch (_) {
+        titleMastery = {};
+      }
+    }
+
+    // Ensure every title has a mastery state
+    for (final t in titlePool) {
+      titleMastery.putIfAbsent(t.id, () => TitleMasteryState.fresh());
+    }
+
     // Evaluate unlocks on load
     await _evaluateTitleUnlocks();
 
@@ -511,7 +573,6 @@ class _SystemHomePageState extends State<SystemHomePage> {
     }
 
     // Ensure today's bundle exists
-    final tKey = todayKey();
     if (dailyBundle == null || dailyBundle!.dateKey != tKey) {
       dailyBundle = _generateDailyBundleFor(tKey);
       await _saveDailyBundle(prefs);
@@ -608,16 +669,32 @@ class _SystemHomePageState extends State<SystemHomePage> {
     await prefs.setString(StorageKeys.unlockedTitlesJson, json.encode(unlockedTitleIds.toList()));
     await prefs.setInt(StorageKeys.totalClears, totalClears);
 
+    await prefs.setString(
+      StorageKeys.titleMasteryJson,
+      json.encode(titleMastery.map((k, v) => MapEntry(k, v.toJson()))),
+    );
+
     await _saveDailyBundle(prefs);
   }
 
   TitleBadge get equippedTitle =>
       titlePool.firstWhere((t) => t.id == equippedTitleId, orElse: () => titlePool.first);
 
-  double get titleXpMult => equippedTitle.buff.xpMult;
-  double get titleCoinMult => equippedTitle.buff.coinMult;
-  int get titleBonusXpFlat => equippedTitle.buff.bonusXpFlat;
-  int get titleBonusCoinsFlat => equippedTitle.buff.bonusCoinsFlat;
+  TitleMasteryState get equippedMastery => titleMastery[equippedTitleId] ?? TitleMasteryState.fresh();
+
+  double _scale(double base, int masteryLevel) {
+    // Each mastery level adds +6% of the base buff (tunable).
+    // Level 1 = 1.00x, Level 10 ≈ 1.54x
+    final factor = 1.0 + ((masteryLevel - 1) * 0.06);
+    return base * factor;
+  }
+
+  int _scaleInt(int base, int masteryLevel) => (_scale(base.toDouble(), masteryLevel)).round();
+
+  double get titleXpMult => _scale(equippedTitle.buff.xpMult, equippedMastery.level);
+  double get titleCoinMult => _scale(equippedTitle.buff.coinMult, equippedMastery.level);
+  int get titleBonusXpFlat => _scaleInt(equippedTitle.buff.bonusXpFlat, equippedMastery.level);
+  int get titleBonusCoinsFlat => _scaleInt(equippedTitle.buff.bonusCoinsFlat, equippedMastery.level);
 
   Future<void> _evaluateTitleUnlocks() async {
     final newlyUnlocked = <TitleBadge>[];
@@ -637,14 +714,56 @@ class _SystemHomePageState extends State<SystemHomePage> {
 
       // show + log each unlock
       for (final t in newlyUnlocked) {
-        showSystemMessage('TITLE UNLOCKED — ${t.name}');
-        await _addLog('title', 'Title Unlocked — ${t.name}', data: {'titleId': t.id, 'title': t.name});
+        final rc = rarityColor(t.rarity);
+        showSystemMessage('TITLE UNLOCKED — ${t.name} (${rarityLabel(t.rarity)})');
+        await _addLog('title', 'Title Unlocked — ${t.name} (${rarityLabel(t.rarity)})', data: {
+          'titleId': t.id, 'title': t.name, 'rarity': rarityLabel(t.rarity)
+        });
+        if (t.rarity == TitleRarity.legendary) {
+          showSystemMessage('LEGENDARY TITLE — ${t.name} ⚡');
+        }
       }
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(StorageKeys.unlockedTitlesJson, json.encode(unlockedTitleIds.toList()));
       await prefs.setString(StorageKeys.equippedTitleId, equippedTitleId);
     }
+  }
+
+  Future<void> _gainTitleMasteryXp(int amount, {String reason = 'Action'}) async {
+    final id = equippedTitleId;
+    var ms = titleMastery[id] ?? TitleMasteryState.fresh();
+
+    if (ms.level >= 10) return;
+
+    int xpAdd = amount;
+    int newLevel = ms.level;
+    int newXp = ms.xp;
+
+    while (xpAdd > 0 && newLevel < 10) {
+      final need = ms.xpToNext - newXp;
+      if (xpAdd >= need) {
+        xpAdd -= need;
+        newLevel += 1;
+        newXp = 0;
+        ms = ms.copyWith(level: newLevel, xp: newXp, xpToNext: masteryXpToNext(newLevel));
+        // Level up event
+        showSystemMessage('TITLE MASTERY UP — ${equippedTitle.name} Lv $newLevel');
+        await _addLog('title', 'Title Mastery Up — ${equippedTitle.name} Lv $newLevel', data: {
+          'titleId': id,
+          'title': equippedTitle.name,
+          'masteryLevel': newLevel,
+          'reason': reason,
+        });
+      } else {
+        newXp += xpAdd;
+        xpAdd = 0;
+        ms = ms.copyWith(xp: newXp);
+      }
+    }
+
+    titleMastery[id] = ms;
+    await _saveAll();
   }
 
   Future<void> equipTitle(String id) async {
@@ -698,6 +817,9 @@ class _SystemHomePageState extends State<SystemHomePage> {
       data: {'xp': gainedXp, 'coins': gainedCoins, 'questId': t.id, 'title': t.title},
     );
     await _saveAll();
+
+    await _gainTitleMasteryXp(12, reason: 'Quest Completed');
+    await _evaluateTitleUnlocks();
   }
 
   bool get _allDone {
@@ -765,6 +887,7 @@ class _SystemHomePageState extends State<SystemHomePage> {
     );
     if (milestoneMsg != null) {
       await _addLog('milestone', milestoneMsg, data: {'streak': streak});
+      await _gainTitleMasteryXp(40, reason: 'Milestone Reward');
     }
 
     // Title bonus log
@@ -782,6 +905,8 @@ class _SystemHomePageState extends State<SystemHomePage> {
     _claimedBonusToday = true;
 
     await _saveAll();
+
+    await _gainTitleMasteryXp(25, reason: 'Bonus Claimed');
     await _evaluateTitleUnlocks();
   }
 
@@ -898,7 +1023,15 @@ class _SystemHomePageState extends State<SystemHomePage> {
       data: {'upgrade': 'xp', 'level': xpBoostLevel, 'cost': cost},
     );
 
+    // Mark spent today
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(StorageKeys.spentUpgradeDayKey, todayKey());
+    _spentUpgradeToday = true;
+
     await _saveAll();
+
+    await _gainTitleMasteryXp(8, reason: 'Upgrade Purchased');
+    await _evaluateTitleUnlocks();
   }
 
   Future<void> buyCoinBoost() async {
@@ -918,7 +1051,15 @@ class _SystemHomePageState extends State<SystemHomePage> {
       data: {'upgrade': 'coin', 'level': coinBoostLevel, 'cost': cost},
     );
 
+    // Mark spent today
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(StorageKeys.spentUpgradeDayKey, todayKey());
+    _spentUpgradeToday = true;
+
     await _saveAll();
+
+    await _gainTitleMasteryXp(8, reason: 'Upgrade Purchased');
+    await _evaluateTitleUnlocks();
   }
 
   Future<void> showSystemMessage(String message) async {
@@ -962,6 +1103,20 @@ class _SystemHomePageState extends State<SystemHomePage> {
             tooltip: 'Dev: force reset',
             onPressed: _forceNewDailyQuest,
             icon: const Icon(Icons.refresh),
+          ),
+          IconButton(
+            tooltip: 'Titles',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => TitlePage(
+                  equippedId: equippedTitleId,
+                  unlocked: unlockedTitleIds,
+                  masteryMap: titleMastery,
+                  onEquip: equipTitle,
+                )),
+              );
+            },
+            icon: const Icon(Icons.badge),
           ),
           IconButton(
             tooltip: 'System Log',
@@ -1010,6 +1165,30 @@ class _SystemHomePageState extends State<SystemHomePage> {
                                   _XPBar(value: (xpToNext == 0) ? 0 : xp / xpToNext),
                                   const SizedBox(height: 6),
                                   Text('$xp / $xpToNext XP', style: TextStyle(color: Colors.white.withOpacity(0.75))),
+                                  const SizedBox(height: 6),
+                                  Text('${equippedTitle.name}', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 16)),
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    children: [
+                                      _Chip(label: 'Title Lv', value: 'Lv ${equippedMastery.level}'),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(999),
+                                          child: LinearProgressIndicator(
+                                            value: equippedMastery.xpToNext == 0 ? 0 : (equippedMastery.xp / equippedMastery.xpToNext).clamp(0, 1),
+                                            minHeight: 8,
+                                            backgroundColor: Colors.white.withOpacity(0.10),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Text(
+                                        '${equippedMastery.xp}/${equippedMastery.xpToNext}',
+                                        style: TextStyle(color: Colors.white.withOpacity(0.6), fontWeight: FontWeight.w700, fontSize: 12),
+                                      ),
+                                    ],
+                                  ),
                                 ],
                               ),
                             ),
@@ -1912,6 +2091,199 @@ class AnalyticsPage extends StatelessWidget {
       ),
     );
   }
+}
+
+class TitlePage extends StatefulWidget {
+  final String equippedId;
+  final Set<String> unlocked;
+  final Map<String, TitleMasteryState> masteryMap;
+  final void Function(String) onEquip;
+
+  const TitlePage({
+    super.key,
+    required this.equippedId,
+    required this.unlocked,
+    required this.masteryMap,
+    required this.onEquip,
+  });
+
+  @override
+  State<TitlePage> createState() => _TitlePageState();
+}
+
+class _TitlePageState extends State<TitlePage> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('TITLES'),
+        centerTitle: true,
+        backgroundColor: const Color(0xFF0B0F17),
+        elevation: 0,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: ListView.builder(
+          itemCount: titlePool.length,
+          itemBuilder: (context, index) {
+            final t = titlePool[index];
+            final isUnlocked = widget.unlocked.contains(t.id);
+            final isEquipped = widget.equippedId == t.id;
+
+            final displayName = (!isUnlocked && t.hidden) ? '???' : t.name;
+            final displayFlavor = (!isUnlocked && t.hidden) ? 'A hidden title. Requirements unknown.' : t.flavor;
+            final displayReq = (!isUnlocked && t.hidden) ? '???' : t.requirement;
+
+            final rc = rarityColor(t.rarity);
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF111827),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isEquipped
+                      ? const Color(0xFF3EF2D4).withOpacity(0.55)
+                      : rc.withOpacity(isUnlocked ? 0.25 : 0.08),
+                ),
+                boxShadow: isUnlocked
+                    ? [
+                        BoxShadow(
+                          color: rc.withOpacity(0.10),
+                          blurRadius: rarityGlow(t.rarity),
+                          spreadRadius: 1,
+                        )
+                      ]
+                    : [],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              displayName,
+                              style: TextStyle(
+                                color: isUnlocked ? Colors.white : Colors.white.withOpacity(0.4),
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              displayFlavor,
+                              style: TextStyle(
+                                color: isUnlocked ? Colors.white.withOpacity(0.7) : Colors.white.withOpacity(0.3),
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (isEquipped)
+                        const Icon(Icons.check_circle, color: Color(0xFF3EF2D4)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: rarityColor(t.rarity).withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: rarityColor(t.rarity).withOpacity(0.35)),
+                        ),
+                        child: Text(
+                          rarityLabel(t.rarity),
+                          style: TextStyle(
+                            color: rarityColor(t.rarity),
+                            fontWeight: FontWeight.w900,
+                            fontSize: 11,
+                            letterSpacing: 0.7,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      if (!(!isUnlocked && t.hidden))
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: Colors.white.withOpacity(0.12)),
+                          ),
+                          child: Text(
+                            'Lv ${widget.masteryMap[t.id]?.level ?? 1}',
+                            style: TextStyle(color: Colors.white.withOpacity(0.85), fontWeight: FontWeight.w900, fontSize: 11),
+                          ),
+                        ),
+                      if (isUnlocked)
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 10),
+                            child: Text(
+                              _buffText(t.buff, widget.masteryMap[t.id] ?? TitleMasteryState.fresh()),
+                              style: TextStyle(color: Colors.white.withOpacity(0.6), fontWeight: FontWeight.w700, fontSize: 12),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Requirement: $displayReq',
+                    style: TextStyle(
+                      color: isUnlocked ? Colors.white.withOpacity(0.5) : Colors.white.withOpacity(0.25),
+                      fontSize: 12,
+                    ),
+                  ),
+                  if (isUnlocked) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: isEquipped ? null : () => widget.onEquip(t.id),
+                        child: Text(isEquipped ? 'EQUIPPED' : 'EQUIP'),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  String _buffText(TitleBuff b, TitleMasteryState ms) {
+    final scaledXp = _scale(b.xpMult, ms.level);
+    final scaledCoin = _scale(b.coinMult, ms.level);
+    final scaledXpFlat = _scaleInt(b.bonusXpFlat, ms.level);
+    final scaledCoinFlat = _scaleInt(b.bonusCoinsFlat, ms.level);
+
+    final parts = <String>[];
+    if (scaledXp != 0) parts.add('XP +${(scaledXp * 100).round()}%');
+    if (scaledCoin != 0) parts.add('Coins +${(scaledCoin * 100).round()}%');
+    if (scaledXpFlat != 0) parts.add('Bonus +$scaledXpFlat XP');
+    if (scaledCoinFlat != 0) parts.add('Bonus +$scaledCoinFlat Coins');
+    if (parts.isEmpty) return 'No Buff';
+    return parts.join(' • ');
+  }
+
+  double _scale(double base, int masteryLevel) {
+    final factor = 1.0 + ((masteryLevel - 1) * 0.06);
+    return base * factor;
+  }
+
+  int _scaleInt(int base, int masteryLevel) => (_scale(base.toDouble(), masteryLevel)).round();
 }
 
 class _BarPainter extends CustomPainter {
