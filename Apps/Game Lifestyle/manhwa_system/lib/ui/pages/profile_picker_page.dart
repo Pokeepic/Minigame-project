@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../services/system_controller.dart';
-import '../../models/profile.dart';
 import '../widgets/page_container.dart';
 
 class ProfilePickerPage extends StatefulWidget {
