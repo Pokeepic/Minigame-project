@@ -1,5 +1,6 @@
 /// System Events and Log Types
 /// Enums and event definitions for the system
+library;
 
 /// Log type enumeration - replaces string-based types
 enum LogType {
