@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import '../../services/system_controller.dart';
 import '../../services/system_repository.dart';
 import '../../ui/widgets/system_overlay_message.dart';
+import '../../ui/widgets/page_container.dart';
 import '../../data/quest_pool.dart';
+import 'system_log_page.dart';
 
 /// System Home Page - Main application page
 class SystemHomePage extends StatefulWidget {
@@ -58,6 +60,8 @@ class _SystemHomePageState extends State<SystemHomePage> {
     });
   }
 
+  bool isWide(BuildContext context) => MediaQuery.of(context).size.width >= 900;
+
   @override
   Widget build(BuildContext context) {
     if (loading || controller == null) {
@@ -73,29 +77,49 @@ class _SystemHomePageState extends State<SystemHomePage> {
     final ctrl = controller!;
 
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('MANHWA SYSTEM'),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            tooltip: 'System Log',
+            icon: const Icon(Icons.receipt_long),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SystemLogPage(controller: ctrl),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
       body: Stack(
         children: [
           SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Header
-                  _buildHeader(ctrl),
-                  const SizedBox(height: 24),
+            child: PageContainer(
+              maxWidth: 1200,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header
+                    _buildHeader(ctrl),
+                    const SizedBox(height: 24),
 
-                  // Stats Card
-                  _buildStatsCard(ctrl),
-                  const SizedBox(height: 24),
+                    // Stats Card
+                    _buildStatsCard(ctrl),
+                    const SizedBox(height: 24),
 
-                  // Daily Quests
-                  _buildDailyQuests(ctrl),
-                  const SizedBox(height: 24),
+                    // Daily Quests
+                    _buildDailyQuests(ctrl),
+                    const SizedBox(height: 24),
 
-                  // Upgrades
-                  _buildUpgrades(ctrl),
-                ],
+                    // Upgrades
+                    _buildUpgrades(ctrl),
+                  ],
+                ),
               ),
             ),
           ),
@@ -239,96 +263,118 @@ class _SystemHomePageState extends State<SystemHomePage> {
         ),
         const SizedBox(height: 12),
 
-        ...List.generate(3, (i) {
-          final template = templateById(bundle.templateIds[i]);
-          final completed = bundle.completed[i];
-
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: InkWell(
-              onTap: completed ? null : () => ctrl.completeQuest(i),
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: completed ? const Color(0xFF0F1419) : const Color(0xFF1A1F2E),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: completed
-                        ? const Color(0xFF10B981)
-                        : const Color(0xFF3EF2D4).withValues(alpha: 0.3),
-                  ),
+        // Responsive quest layout
+        isWide(context)
+            ? GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 3.3,
                 ),
-                child: Row(
-                  children: [
-                    Icon(
-                      completed ? Icons.check_circle : Icons.radio_button_unchecked,
-                      color: completed ? const Color(0xFF10B981) : Colors.white24,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            template.title,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: completed ? Colors.white38 : Colors.white,
-                              decoration: completed ? TextDecoration.lineThrough : null,
-                            ),
-                          ),
-                          Text(
-                            template.description,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: completed ? Colors.white24 : Colors.white54,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Text(
-                      '${template.baseXp} XP',
-                      style: const TextStyle(
-                        color: Color(0xFF3EF2D4),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                itemCount: 3,
+                itemBuilder: (context, i) => _buildQuestCard(ctrl, bundle, i),
+              )
+            : Column(
+                children: [
+                  for (int i = 0; i < 3; i++) ...[
+                    _buildQuestCard(ctrl, bundle, i),
+                    const SizedBox(height: 12),
                   ],
-                ),
+                ],
               ),
-            ),
-          );
-        }),
 
         // Claim Bonus Button
         if (ctrl.allQuestsDone && !bundle.bonusClaimed)
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => ctrl.claimAllBonus(),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF3EF2D4),
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+            child: Center(
+              child: SizedBox(
+                width: isWide(context) ? 400 : double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => ctrl.claimAllBonus(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF3EF2D4),
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
-                ),
-                child: const Text(
-                  'CLAIM ALL BONUS',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
+                  child: const Text(
+                    'CLAIM ALL BONUS',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildQuestCard(SystemController ctrl, bundle, int i) {
+    final template = templateById(bundle.templateIds[i]);
+    final completed = bundle.completed[i];
+
+    return InkWell(
+      onTap: completed ? null : () => ctrl.completeQuest(i),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: completed ? const Color(0xFF0F1419) : const Color(0xFF1A1F2E),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: completed
+                ? const Color(0xFF10B981)
+                : const Color(0xFF3EF2D4).withValues(alpha: 0.3),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              completed ? Icons.check_circle : Icons.radio_button_unchecked,
+              color: completed ? const Color(0xFF10B981) : Colors.white24,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    template.title,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: completed ? Colors.white38 : Colors.white,
+                      decoration: completed ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                  Text(
+                    template.description,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: completed ? Colors.white24 : Colors.white54,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              '${template.baseXp} XP',
+              style: const TextStyle(
+                color: Color(0xFF3EF2D4),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -413,17 +459,21 @@ class _SystemHomePageState extends State<SystemHomePage> {
                 ],
               ),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: canAfford ? const Color(0xFFF2D43E) : Colors.white10,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                '$cost',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: canAfford ? Colors.black : Colors.white24,
+            SizedBox(
+              width: 120,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: canAfford ? const Color(0xFFF2D43E) : Colors.white10,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$cost',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: canAfford ? Colors.black : Colors.white24,
+                  ),
                 ),
               ),
             ),
