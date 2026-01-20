@@ -2,6 +2,10 @@
 /// All magic numbers and configuration values centralized here
 library;
 
+// Profile Constants (global, not namespaced)
+const String kProfilesKey = 'profiles_json';
+const String kActiveProfileIdKey = 'active_profile';
+
 // XP and Level Constants
 const int kLevelXpBase = 100;
 const int kLevelXpStep = 25;

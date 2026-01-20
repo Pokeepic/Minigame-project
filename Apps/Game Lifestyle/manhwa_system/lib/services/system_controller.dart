@@ -3,6 +3,7 @@ import '../models/title.dart';
 import '../models/daily_bundle.dart';
 import '../models/system_log.dart';
 import '../models/mastery.dart';
+import '../models/profile.dart';
 import '../data/quest_pool.dart';
 import '../data/title_pool.dart';
 import '../services/system_repository.dart';
@@ -18,6 +19,10 @@ class SystemController implements SystemState {
   // Callbacks for UI updates
   Function()? onStateChanged;
   Function(String message)? onSystemMessage;
+
+  // Profile State
+  List<UserProfile> profiles = [];
+  String activeProfileId = '';
 
   // Player State
   @override
@@ -49,8 +54,8 @@ class SystemController implements SystemState {
   Set<String> unlockedTitleIds = {'rookie'};
   @override
   Map<String, bool> get unlockedTitles => {
-    for (var id in unlockedTitleIds) id: true,
-  };
+        for (var id in unlockedTitleIds) id: true,
+      };
   Map<String, TitleMasteryState> titleMastery = {};
 
   @override
@@ -62,41 +67,64 @@ class SystemController implements SystemState {
 
   SystemController(this._repo);
 
-  /// Initialize the system - load or create state
+  /// Initialize the system - load or create profiles and state
   Future<void> initialize() async {
-    await _loadSystemLog();
+    // Load profiles
+    profiles = _repo.getProfiles();
+    activeProfileId = _repo.getActiveProfileId() ?? '';
+
+    // If no profiles exist, create default profile
+    if (profiles.isEmpty) {
+      final defaultProfile = UserProfile(
+        id: '1',
+        name: 'Profile 1',
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      profiles = [defaultProfile];
+      activeProfileId = defaultProfile.id;
+      await _repo.setProfiles(profiles);
+      await _repo.setActiveProfileId(activeProfileId);
+    }
+
+    // Load active profile state
+    await _loadStateFor(activeProfileId);
+  }
+
+  /// Load game state for a specific profile
+  Future<void> _loadStateFor(String pid) async {
+    await _loadSystemLog(pid);
     final tKey = todayKey;
 
     // Load player state
-    level = _repo.getLevel();
-    xp = _repo.getXp();
-    xpToNext = _repo.getXpToNext();
-    coins = _repo.getCoins();
+    level = _repo.getLevel(pid);
+    xp = _repo.getXp(pid);
+    xpToNext = _repo.getXpToNext(pid);
+    coins = _repo.getCoins(pid);
 
-    xpBoostLevel = _repo.getXpBoostLevel();
-    coinBoostLevel = _repo.getCoinBoostLevel();
+    xpBoostLevel = _repo.getXpBoostLevel(pid);
+    coinBoostLevel = _repo.getCoinBoostLevel(pid);
 
-    streak = _repo.getStreak();
-    bestStreak = _repo.getBestStreak();
-    lastClearedDateKey = _repo.getLastClearedDateKey();
+    streak = _repo.getStreak(pid);
+    bestStreak = _repo.getBestStreak(pid);
+    lastClearedDateKey = _repo.getLastClearedDateKey(pid);
 
-    milestoneClaimedUpTo = _repo.getMilestoneClaimedUpTo();
-    lastAlertDateKey = _repo.getLastAlertDateKey();
+    milestoneClaimedUpTo = _repo.getMilestoneClaimedUpTo(pid);
+    lastAlertDateKey = _repo.getLastAlertDateKey(pid);
 
     // Load title system
-    equippedTitleId = _repo.getEquippedTitleId() ?? 'rookie';
-    totalClears = _repo.getTotalClears();
+    equippedTitleId = _repo.getEquippedTitleId(pid) ?? 'rookie';
+    totalClears = _repo.getTotalClears(pid);
 
-    final unlockedMap = _repo.getUnlockedTitles();
+    final unlockedMap = _repo.getUnlockedTitles(pid);
     unlockedTitleIds = unlockedMap.keys.toSet();
     unlockedTitleIds.add('rookie'); // Ensure rookie always unlocked
 
     // Load hidden title flags
-    spentUpgradeDayKey = _repo.getSpentUpgradeDayKey();
-    claimedBonusDayKey = _repo.getClaimedBonusDayKey();
+    spentUpgradeDayKey = _repo.getSpentUpgradeDayKey(pid);
+    claimedBonusDayKey = _repo.getClaimedBonusDayKey(pid);
 
     // Load mastery
-    titleMastery = _repo.getTitleMastery();
+    titleMastery = _repo.getTitleMastery(pid);
 
     // Ensure every title has a mastery state
     for (final t in titlePool) {
@@ -107,25 +135,25 @@ class SystemController implements SystemState {
     await _evaluateTitleUnlocks();
 
     // Load daily bundle
-    dailyBundle = _repo.getDailyBundle();
+    dailyBundle = _repo.getDailyBundle(pid);
 
     // Ensure today's bundle exists
     if (dailyBundle == null || dailyBundle!.dateKey != tKey) {
       dailyBundle = _generateDailyBundleFor(tKey);
-      await _repo.setDailyBundle(dailyBundle!);
+      await _repo.setDailyBundle(pid, dailyBundle!);
     }
 
     _notifyStateChanged();
   }
 
-  Future<void> _loadSystemLog() async {
-    systemLog = _repo.getLogs();
+  Future<void> _loadSystemLog(String pid) async {
+    systemLog = _repo.getLogs(pid);
   }
 
   Future<void> _saveSystemLog() async {
     // Keep only max logs
     final logsToSave = systemLog.take(kMaxLogs).toList();
-    await _repo.setLogs(logsToSave);
+    await _repo.setLogs(activeProfileId, logsToSave);
   }
 
   Future<void> _addLog(
@@ -168,30 +196,31 @@ class SystemController implements SystemState {
   }
 
   Future<void> _saveAll() async {
-    await _repo.setLevel(level);
-    await _repo.setXp(xp);
-    await _repo.setXpToNext(xpToNext);
-    await _repo.setCoins(coins);
-    await _repo.setXpBoostLevel(xpBoostLevel);
-    await _repo.setCoinBoostLevel(coinBoostLevel);
-    await _repo.setStreak(streak);
-    await _repo.setBestStreak(bestStreak);
+    final pid = activeProfileId;
+    await _repo.setLevel(pid, level);
+    await _repo.setXp(pid, xp);
+    await _repo.setXpToNext(pid, xpToNext);
+    await _repo.setCoins(pid, coins);
+    await _repo.setXpBoostLevel(pid, xpBoostLevel);
+    await _repo.setCoinBoostLevel(pid, coinBoostLevel);
+    await _repo.setStreak(pid, streak);
+    await _repo.setBestStreak(pid, bestStreak);
     if (lastClearedDateKey != null) {
-      await _repo.setLastClearedDateKey(lastClearedDateKey!);
+      await _repo.setLastClearedDateKey(pid, lastClearedDateKey!);
     }
-    await _repo.setMilestoneClaimedUpTo(milestoneClaimedUpTo);
+    await _repo.setMilestoneClaimedUpTo(pid, milestoneClaimedUpTo);
     if (lastAlertDateKey != null) {
-      await _repo.setLastAlertDateKey(lastAlertDateKey!);
+      await _repo.setLastAlertDateKey(pid, lastAlertDateKey!);
     }
 
     // Save title system
-    await _repo.setEquippedTitleId(equippedTitleId);
-    await _repo.setUnlockedTitles(unlockedTitles);
-    await _repo.setTotalClears(totalClears);
-    await _repo.setTitleMastery(titleMastery);
+    await _repo.setEquippedTitleId(pid, equippedTitleId);
+    await _repo.setUnlockedTitles(pid, unlockedTitles);
+    await _repo.setTotalClears(pid, totalClears);
+    await _repo.setTitleMastery(pid, titleMastery);
 
     if (dailyBundle != null) {
-      await _repo.setDailyBundle(dailyBundle!);
+      await _repo.setDailyBundle(pid, dailyBundle!);
     }
   }
 
@@ -560,7 +589,7 @@ class SystemController implements SystemState {
 
     // Update tracking
     claimedBonusDayKey = todayKey;
-    await _repo.setClaimedBonusDayKey(todayKey);
+    await _repo.setClaimedBonusDayKey(activeProfileId, todayKey);
 
     await _saveAll();
     await _gainTitleMasteryXp(25, reason: 'Daily Clear');
@@ -577,7 +606,7 @@ class SystemController implements SystemState {
     xpBoostLevel += 1;
 
     spentUpgradeDayKey = todayKey;
-    await _repo.setSpentUpgradeDayKey(todayKey);
+    await _repo.setSpentUpgradeDayKey(activeProfileId, todayKey);
 
     _showSystemMessage('XP Boost Upgraded to Level $xpBoostLevel');
     await _addLog(
@@ -602,7 +631,7 @@ class SystemController implements SystemState {
     coinBoostLevel += 1;
 
     spentUpgradeDayKey = todayKey;
-    await _repo.setSpentUpgradeDayKey(todayKey);
+    await _repo.setSpentUpgradeDayKey(activeProfileId, todayKey);
 
     _showSystemMessage('Coin Boost Upgraded to Level $coinBoostLevel');
     await _addLog(
@@ -622,4 +651,48 @@ class SystemController implements SystemState {
       kXpBoostCostBase * pow(kXpBoostCostMult, xpBoostLevel).toInt();
   int coinBoostCost() =>
       kCoinBoostCostBase * pow(kCoinBoostCostMult, coinBoostLevel).toInt();
-}
+
+  // ---------------------------
+  // Profile Management
+  // ---------------------------
+
+  /// Create a new profile
+  Future<void> createProfile(String name) async {
+    final newId = (profiles.length + 1).toString();
+    final newProfile = UserProfile(
+      id: newId,
+      name: name,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+    );
+
+    profiles.add(newProfile);
+    await _repo.setProfiles(profiles);
+
+    // Switch to new profile
+    await switchProfile(newId);
+  }
+
+  /// Switch to another profile
+  Future<void> switchProfile(String profileId) async {
+    if (!profiles.any((p) => p.id == profileId)) return;
+
+    activeProfileId = profileId;
+    await _repo.setActiveProfileId(profileId);
+
+    // Reload state for the new profile
+    await _loadStateFor(profileId);
+  }
+
+  /// Delete a profile
+  Future<bool> deleteProfile(String profileId) async {
+    if (profiles.length <= 1) return false; // Cannot delete last profile
+    if (profileId == activeProfileId) return false; // Cannot delete active
+
+    // Delete all profile data from storage
+    await _repo.deleteProfileData(profileId);
+
+    profiles.removeWhere((p) => p.id == profileId);
+    await _repo.setProfiles(profiles);
+    _notifyStateChanged();
+    return true;
+  }}

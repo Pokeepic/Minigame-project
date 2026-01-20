@@ -5,6 +5,7 @@ import '../../ui/widgets/system_overlay_message.dart';
 import '../../ui/widgets/page_container.dart';
 import '../../data/quest_pool.dart';
 import 'system_log_page.dart';
+import 'profile_picker_page.dart';
 
 /// System Home Page - Main application page
 class SystemHomePage extends StatefulWidget {
@@ -81,6 +82,20 @@ class _SystemHomePageState extends State<SystemHomePage> {
         title: const Text('MANHWA SYSTEM'),
         centerTitle: true,
         actions: [
+          IconButton(
+            tooltip: 'Profiles',
+            icon: const Icon(Icons.person),
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ProfilePickerPage(controller: ctrl),
+                ),
+              );
+              // Refresh after returning from profile picker
+              if (mounted) setState(() {});
+            },
+          ),
           IconButton(
             tooltip: 'System Log',
             icon: const Icon(Icons.receipt_long),

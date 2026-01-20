@@ -3,6 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/daily_bundle.dart';
 import '../models/system_log.dart';
 import '../models/mastery.dart';
+import '../models/profile.dart';
+import '../utils/constants.dart';
 
 /// Centralized storage repository using SharedPreferences
 /// All storage access should go through this class
@@ -37,22 +39,107 @@ class SystemRepository {
     return SystemRepository(prefs);
   }
 
-  // Player stats
-  int getLevel() => _prefs.getInt(_keyLevel) ?? 1;
-  Future<void> setLevel(int value) => _prefs.setInt(_keyLevel, value);
+  // ---------------------------
+  // Profiles (GLOBAL)
+  // ---------------------------
+  List<UserProfile> getProfiles() {
+    final raw = _prefs.getString(kProfilesKey);
+    if (raw == null) return [];
+    try {
+      final list = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+      return list.map(UserProfile.fromJson).toList();
+    } catch (_) {
+      return [];
+    }
+  }
 
-  int getXp() => _prefs.getInt(_keyXp) ?? 0;
-  Future<void> setXp(int value) => _prefs.setInt(_keyXp, value);
+  Future<void> setProfiles(List<UserProfile> profiles) async {
+    final raw = jsonEncode(profiles.map((p) => p.toJson()).toList());
+    await _prefs.setString(kProfilesKey, raw);
+  }
 
-  int getXpToNext() => _prefs.getInt(_keyXpToNext) ?? 100;
-  Future<void> setXpToNext(int value) => _prefs.setInt(_keyXpToNext, value);
+  String? getActiveProfileId() => _prefs.getString(kActiveProfileIdKey);
+  Future<void> setActiveProfileId(String id) =>
+      _prefs.setString(kActiveProfileIdKey, id);
 
-  int getCoins() => _prefs.getInt(_keyCoins) ?? 0;
-  Future<void> setCoins(int value) => _prefs.setInt(_keyCoins, value);
+  // ---------------------------
+  // Namespacing helper
+  // ---------------------------
+  String _k(String profileId, String key) => 'p:$profileId:$key';
 
-  // Daily quest bundle
-  DailyQuestBundle? getDailyBundle() {
-    final json = _prefs.getString(_keyDailyBundleJson);
+  // ---------------------------
+  // Per-profile key registry
+  // ---------------------------
+  static const String _keyRegistry = '__keys';
+
+  String _registryKey(String profileId) => _k(profileId, _keyRegistry);
+
+  Set<String> _getRegisteredKeys(String pid) {
+    final raw = _prefs.getString(_registryKey(pid));
+    if (raw == null) return {};
+    try {
+      final list = (jsonDecode(raw) as List).cast<String>();
+      return list.toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> _registerKey(String pid, String fullKey) async {
+    final keys = _getRegisteredKeys(pid);
+    if (keys.add(fullKey)) {
+      await _prefs.setString(_registryKey(pid), jsonEncode(keys.toList()));
+    }
+  }
+
+  Future<void> _unregisterKey(String pid, String fullKey) async {
+    final keys = _getRegisteredKeys(pid);
+    if (keys.remove(fullKey)) {
+      await _prefs.setString(_registryKey(pid), jsonEncode(keys.toList()));
+    }
+  }
+
+  // ---------------------------
+  // Internal wrappers
+  // ---------------------------
+  Future<void> _setInt(String pid, String key, int value) async {
+    final full = _k(pid, key);
+    await _prefs.setInt(full, value);
+    await _registerKey(pid, full);
+  }
+
+  Future<void> _setString(String pid, String key, String value) async {
+    final full = _k(pid, key);
+    await _prefs.setString(full, value);
+    await _registerKey(pid, full);
+  }
+
+  Future<void> _remove(String pid, String key) async {
+    final full = _k(pid, key);
+    await _prefs.remove(full);
+    await _unregisterKey(pid, full);
+  }
+
+  // Player stats (profile-specific)
+  int getLevel(String pid) => _prefs.getInt(_k(pid, _keyLevel)) ?? 1;
+  Future<void> setLevel(String pid, int value) =>
+      _setInt(pid, _keyLevel, value);
+
+  int getXp(String pid) => _prefs.getInt(_k(pid, _keyXp)) ?? 0;
+  Future<void> setXp(String pid, int value) =>
+      _setInt(pid, _keyXp, value);
+
+  int getXpToNext(String pid) => _prefs.getInt(_k(pid, _keyXpToNext)) ?? 100;
+  Future<void> setXpToNext(String pid, int value) =>
+      _setInt(pid, _keyXpToNext, value);
+
+  int getCoins(String pid) => _prefs.getInt(_k(pid, _keyCoins)) ?? 0;
+  Future<void> setCoins(String pid, int value) =>
+      _setInt(pid, _keyCoins, value);
+
+  // Daily quest bundle (profile-specific)
+  DailyQuestBundle? getDailyBundle(String pid) {
+    final json = _prefs.getString(_k(pid, _keyDailyBundleJson));
     if (json == null) return null;
     try {
       return DailyQuestBundle.fromJson(jsonDecode(json));
@@ -61,43 +148,51 @@ class SystemRepository {
     }
   }
 
-  Future<void> setDailyBundle(DailyQuestBundle bundle) {
-    return _prefs.setString(_keyDailyBundleJson, jsonEncode(bundle.toJson()));
+  Future<void> setDailyBundle(String pid, DailyQuestBundle bundle) {
+    return _setString(pid, _keyDailyBundleJson, jsonEncode(bundle.toJson()));
   }
 
-  // Upgrades
-  int getXpBoostLevel() => _prefs.getInt(_keyXpBoostLevel) ?? 0;
-  Future<void> setXpBoostLevel(int value) =>
-      _prefs.setInt(_keyXpBoostLevel, value);
+  // Upgrades (profile-specific)
+  int getXpBoostLevel(String pid) =>
+      _prefs.getInt(_k(pid, _keyXpBoostLevel)) ?? 0;
+  Future<void> setXpBoostLevel(String pid, int value) =>
+      _setInt(pid, _keyXpBoostLevel, value);
 
-  int getCoinBoostLevel() => _prefs.getInt(_keyCoinBoostLevel) ?? 0;
-  Future<void> setCoinBoostLevel(int value) =>
-      _prefs.setInt(_keyCoinBoostLevel, value);
+  int getCoinBoostLevel(String pid) =>
+      _prefs.getInt(_k(pid, _keyCoinBoostLevel)) ?? 0;
+  Future<void> setCoinBoostLevel(String pid, int value) =>
+      _setInt(pid, _keyCoinBoostLevel, value);
 
-  // Streak
-  int getStreak() => _prefs.getInt(_keyStreak) ?? 0;
-  Future<void> setStreak(int value) => _prefs.setInt(_keyStreak, value);
+  // Streak (profile-specific)
+  int getStreak(String pid) => _prefs.getInt(_k(pid, _keyStreak)) ?? 0;
+  Future<void> setStreak(String pid, int value) =>
+      _setInt(pid, _keyStreak, value);
 
-  int getBestStreak() => _prefs.getInt(_keyBestStreak) ?? 0;
-  Future<void> setBestStreak(int value) => _prefs.setInt(_keyBestStreak, value);
+  int getBestStreak(String pid) =>
+      _prefs.getInt(_k(pid, _keyBestStreak)) ?? 0;
+  Future<void> setBestStreak(String pid, int value) =>
+      _setInt(pid, _keyBestStreak, value);
 
-  String? getLastClearedDateKey() => _prefs.getString(_keyLastClearedDateKey);
-  Future<void> setLastClearedDateKey(String value) =>
-      _prefs.setString(_keyLastClearedDateKey, value);
+  String? getLastClearedDateKey(String pid) =>
+      _prefs.getString(_k(pid, _keyLastClearedDateKey));
+  Future<void> setLastClearedDateKey(String pid, String value) =>
+      _setString(pid, _keyLastClearedDateKey, value);
 
-  // Milestones
-  int getMilestoneClaimedUpTo() => _prefs.getInt(_keyMilestoneClaimedUpTo) ?? 0;
-  Future<void> setMilestoneClaimedUpTo(int value) =>
-      _prefs.setInt(_keyMilestoneClaimedUpTo, value);
+  // Milestones (profile-specific)
+  int getMilestoneClaimedUpTo(String pid) =>
+      _prefs.getInt(_k(pid, _keyMilestoneClaimedUpTo)) ?? 0;
+  Future<void> setMilestoneClaimedUpTo(String pid, int value) =>
+      _setInt(pid, _keyMilestoneClaimedUpTo, value);
 
-  // Alerts
-  String? getLastAlertDateKey() => _prefs.getString(_keyLastAlertDateKey);
-  Future<void> setLastAlertDateKey(String value) =>
-      _prefs.setString(_keyLastAlertDateKey, value);
+  // Alerts (profile-specific)
+  String? getLastAlertDateKey(String pid) =>
+      _prefs.getString(_k(pid, _keyLastAlertDateKey));
+  Future<void> setLastAlertDateKey(String pid, String value) =>
+      _setString(pid, _keyLastAlertDateKey, value);
 
-  // Logs
-  List<SystemLogEntry> getLogs() {
-    final json = _prefs.getString(_keySystemLogJson);
+  // Logs (profile-specific)
+  List<SystemLogEntry> getLogs(String pid) {
+    final json = _prefs.getString(_k(pid, _keySystemLogJson));
     if (json == null) return [];
     try {
       final list = (jsonDecode(json) as List).cast<Map<String, dynamic>>();
@@ -107,22 +202,23 @@ class SystemRepository {
     }
   }
 
-  Future<void> setLogs(List<SystemLogEntry> logs) {
+  Future<void> setLogs(String pid, List<SystemLogEntry> logs) {
     final json = jsonEncode(logs.map((e) => e.toJson()).toList());
-    return _prefs.setString(_keySystemLogJson, json);
+    return _setString(pid, _keySystemLogJson, json);
   }
 
-  // Titles
-  String? getEquippedTitleId() => _prefs.getString(_keyEquippedTitleId);
-  Future<void> setEquippedTitleId(String? value) {
+  // Titles (profile-specific)
+  String? getEquippedTitleId(String pid) =>
+      _prefs.getString(_k(pid, _keyEquippedTitleId));
+  Future<void> setEquippedTitleId(String pid, String? value) {
     if (value == null) {
-      return _prefs.remove(_keyEquippedTitleId);
+      return _remove(pid, _keyEquippedTitleId);
     }
-    return _prefs.setString(_keyEquippedTitleId, value);
+    return _setString(pid, _keyEquippedTitleId, value);
   }
 
-  Map<String, bool> getUnlockedTitles() {
-    final json = _prefs.getString(_keyUnlockedTitlesJson);
+  Map<String, bool> getUnlockedTitles(String pid) {
+    final json = _prefs.getString(_k(pid, _keyUnlockedTitlesJson));
     if (json == null) return {};
     try {
       return (jsonDecode(json) as Map).cast<String, bool>();
@@ -131,26 +227,29 @@ class SystemRepository {
     }
   }
 
-  Future<void> setUnlockedTitles(Map<String, bool> titles) {
-    return _prefs.setString(_keyUnlockedTitlesJson, jsonEncode(titles));
+  Future<void> setUnlockedTitles(String pid, Map<String, bool> titles) {
+    return _setString(pid, _keyUnlockedTitlesJson, jsonEncode(titles));
   }
 
-  int getTotalClears() => _prefs.getInt(_keyTotalClears) ?? 0;
-  Future<void> setTotalClears(int value) =>
-      _prefs.setInt(_keyTotalClears, value);
+  int getTotalClears(String pid) =>
+      _prefs.getInt(_k(pid, _keyTotalClears)) ?? 0;
+  Future<void> setTotalClears(String pid, int value) =>
+      _setInt(pid, _keyTotalClears, value);
 
-  // Day tracking
-  String? getSpentUpgradeDayKey() => _prefs.getString(_keySpentUpgradeDayKey);
-  Future<void> setSpentUpgradeDayKey(String value) =>
-      _prefs.setString(_keySpentUpgradeDayKey, value);
+  // Day tracking (profile-specific)
+  String? getSpentUpgradeDayKey(String pid) =>
+      _prefs.getString(_k(pid, _keySpentUpgradeDayKey));
+  Future<void> setSpentUpgradeDayKey(String pid, String value) =>
+      _setString(pid, _keySpentUpgradeDayKey, value);
 
-  String? getClaimedBonusDayKey() => _prefs.getString(_keyClaimedBonusDayKey);
-  Future<void> setClaimedBonusDayKey(String value) =>
-      _prefs.setString(_keyClaimedBonusDayKey, value);
+  String? getClaimedBonusDayKey(String pid) =>
+      _prefs.getString(_k(pid, _keyClaimedBonusDayKey));
+  Future<void> setClaimedBonusDayKey(String pid, String value) =>
+      _setString(pid, _keyClaimedBonusDayKey, value);
 
-  // Title mastery
-  Map<String, TitleMasteryState> getTitleMastery() {
-    final json = _prefs.getString(_keyTitleMasteryJson);
+  // Title mastery (profile-specific)
+  Map<String, TitleMasteryState> getTitleMastery(String pid) {
+    final json = _prefs.getString(_k(pid, _keyTitleMasteryJson));
     if (json == null) return {};
     try {
       final map = (jsonDecode(json) as Map).cast<String, dynamic>();
@@ -160,9 +259,22 @@ class SystemRepository {
     }
   }
 
-  Future<void> setTitleMastery(Map<String, TitleMasteryState> mastery) {
+  Future<void> setTitleMastery(String pid, Map<String, TitleMasteryState> mastery) {
     final json = jsonEncode(mastery.map((k, v) => MapEntry(k, v.toJson())));
-    return _prefs.setString(_keyTitleMasteryJson, json);
+    return _setString(pid, _keyTitleMasteryJson, json);
+  }
+
+  /// Delete all data for a specific profile
+  Future<void> deleteProfileData(String pid) async {
+    final keys = _getRegisteredKeys(pid);
+
+    // Remove every stored key for this profile
+    for (final k in keys) {
+      await _prefs.remove(k);
+    }
+
+    // Remove registry itself
+    await _prefs.remove(_registryKey(pid));
   }
 
   /// Clear all data (for testing/reset)
