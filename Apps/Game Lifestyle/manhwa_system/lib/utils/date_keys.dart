@@ -1,5 +1,6 @@
 /// Date Key Utilities
 /// Centralized date formatting and key generation
+library;
 
 /// Generates a date key in yyyy-MM-dd format from a DateTime
 String dateKeyFrom(DateTime dt) {

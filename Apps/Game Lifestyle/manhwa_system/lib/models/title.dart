@@ -27,6 +27,8 @@ abstract class SystemState {
   int get totalQuestsCompleted;
   int get totalBonusesClaimed;
   int get maxStreak;
+  int get totalClears;
+  Set<String> get unlockedTitleIds;
   Map<String, bool> get unlockedTitles;
 }
 

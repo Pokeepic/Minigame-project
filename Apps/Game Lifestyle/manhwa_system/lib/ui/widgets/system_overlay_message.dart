@@ -25,12 +25,12 @@ class SystemOverlayMessage extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           decoration: BoxDecoration(
-            color: const Color(0xFF0B0F17).withOpacity(0.95),
+            color: const Color(0xFF0B0F17).withValues(alpha: 0.95),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: const Color(0xFF3EF2D4), width: 2),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF3EF2D4).withOpacity(0.3),
+                color: const Color(0xFF3EF2D4).withValues(alpha: 0.3),
                 blurRadius: 20,
                 offset: const Offset(0, 4),
               ),

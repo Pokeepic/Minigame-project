@@ -1,5 +1,3 @@
-import '../utils/constants.dart';
-
 /// Quest Template - represents a type of quest that can be assigned
 class QuestTemplate {
   final String id;

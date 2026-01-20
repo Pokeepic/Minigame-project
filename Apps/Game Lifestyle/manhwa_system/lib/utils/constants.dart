@@ -1,5 +1,6 @@
 /// Game Constants
 /// All magic numbers and configuration values centralized here
+library;
 
 // XP and Level Constants
 const int kLevelXpBase = 100;
